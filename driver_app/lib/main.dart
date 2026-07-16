@@ -8,10 +8,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
-
 // Configuration URL - Change to your Cloud Run URL in production
-const String apiBaseUrl = "http://10.0.2.2:5001";
-const String wsBaseUrl = "ws://10.0.2.2:5001";
+const String apiBaseUrl = "https://vaya-backend-275777907648.us-central1.run.app";
+const String wsBaseUrl = "wss://vaya-backend-275777907648.us-central1.run.app";
 
 // VAYA Driver App Theme (Ink Black / Slate / Saffron)
 class VayaDriverTheme {
