@@ -29,6 +29,7 @@
 # Private / Secrets keys
 **/serviceAccountKey.json
 **/google-services.json
+**/key.properties
 **/*.jks
 **/*.keystore
 temp/
