@@ -533,7 +533,39 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     if (!serviceEnabled) return;
 
     LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      // Show Google Play compliant Prominent Disclosure Dialog before permission request
+      final bool? proceed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            backgroundColor: VayaDriverTheme.slate,
+            title: const Text(
+              'Location Background Usage',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            content: const Text(
+              'VAYA Driver collects location data to find nearby trips and track routes to customers, even when the app is closed or not in use.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Deny', style: TextStyle(color: Colors.redAccent)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.saffron),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Accept & Continue', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (proceed != true) return;
+
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) return;
     }

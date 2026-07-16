@@ -1,6 +1,6 @@
-# Privacy Policy for Goods Delivery Platform
+# Privacy Policy for VAYA Logistics Network
 
-**Last Updated: July 15, 2026**
+**Last Updated: July 16, 2026**
 
 This Privacy Policy describes how our platform ("we", "us", or "our") collects, uses, and shares your personal information when you use our Customer or Driver mobile applications.
 
@@ -43,5 +43,5 @@ We store all transactional details, location positions, and audit logs on secure
 
 ## 5. Contact Us
 If you have any questions about this Privacy Policy, you can reach out to:
-- Email: `support@goodsdelivery.com`
+- Email: `support@vaya.in`
 - Phone: `+91 99388 12345`
