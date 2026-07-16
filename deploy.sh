@@ -46,6 +46,7 @@ read -p "Enter VITE_FIREBASE_AUTH_DOMAIN: " FB_AUTH_DOMAIN
 read -p "Enter VITE_FIREBASE_STORAGE_BUCKET: " FB_STORAGE_BUCKET
 read -p "Enter VITE_FIREBASE_MESSAGING_SENDER_ID: " FB_SENDER_ID
 read -p "Enter VITE_FIREBASE_APP_ID: " FB_APP_ID
+read -p "Enter VITE_GOOGLE_MAPS_API_KEY (or press Enter to configure later): " GM_API_KEY
 
 cat <<EOT > web_portal/.env
 VITE_FIREBASE_API_KEY=$FB_API_KEY
@@ -54,6 +55,7 @@ VITE_FIREBASE_PROJECT_ID=$PROJECT_ID
 VITE_FIREBASE_STORAGE_BUCKET=$FB_STORAGE_BUCKET
 VITE_FIREBASE_MESSAGING_SENDER_ID=$FB_SENDER_ID
 VITE_FIREBASE_APP_ID=$FB_APP_ID
+VITE_GOOGLE_MAPS_API_KEY=$GM_API_KEY
 EOT
 
 # Sync same credentials to public website if needed
@@ -91,8 +93,7 @@ gcloud run deploy vaya-backend \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars DATABASE_URL="$DATABASE_URL" \
-  --set-env-vars PORT=8080
+  --set-env-vars DATABASE_URL="$DATABASE_URL"
 
 cd ..
 
