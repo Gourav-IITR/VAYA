@@ -1,0 +1,14 @@
+{
+  "@@locale": "or",
+  "selectLanguage": "ଭାଷା ଚୟନ କରନ୍ତୁ",
+  "welcome": "ସାମଗ୍ରୀ ପରିବହନ",
+  "mobileLogin": "ମୋବାଇଲ୍ ଲଗ୍ ଇନ୍",
+  "enterMobile": "୧୦-ଅଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ଦିଅନ୍ତୁ",
+  "sendOtp": "OTP ପଠାନ୍ତୁ",
+  "verifyOtp": "OTP ଯାଞ୍ଚ କରନ୍ତୁ",
+  "bike": "ବାଇକ୍",
+  "miniTruck": "ମିନି ଟ୍ରକ୍ (ଟାଟା ଏସି)",
+  "largeTruck": "ବଡ଼ ଟ୍ରକ୍ (ଟାଟା ୪୦୭)",
+  "bookNow": "ବୁକିଂ କରନ୍ତୁ",
+  "tracking": "ବୁକିଂ ଟ୍ରାକ୍"
+}

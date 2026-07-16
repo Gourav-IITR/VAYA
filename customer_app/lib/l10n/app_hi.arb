@@ -1,0 +1,14 @@
+{
+  "@@locale": "hi",
+  "selectLanguage": "भाषा चुनें",
+  "welcome": "सामान डिलीवरी",
+  "mobileLogin": "मोबाइल लॉगिन",
+  "enterMobile": "10-अंकीय मोबाइल नंबर दर्ज करें",
+  "sendOtp": "ओटीपी भेजें",
+  "verifyOtp": "ओटीपी सत्यापित करें",
+  "bike": "बाइक",
+  "miniTruck": "मिनी ट्रक (टाटा एस)",
+  "largeTruck": "बड़ा ट्रक (टाटा 407)",
+  "bookNow": "बुकिंग करें",
+  "tracking": "ट्रैकिंग"
+}

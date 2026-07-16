@@ -1,0 +1,14 @@
+{
+  "@@locale": "en",
+  "selectLanguage": "Select Language",
+  "welcome": "Goods Delivery",
+  "mobileLogin": "Mobile Login",
+  "enterMobile": "Enter 10-digit Mobile Number",
+  "sendOtp": "Send OTP",
+  "verifyOtp": "Verify OTP",
+  "bike": "Bike",
+  "miniTruck": "Mini Truck (Tata Ace)",
+  "largeTruck": "Large Truck (Tata 407)",
+  "bookNow": "Book Delivery",
+  "tracking": "Track Delivery"
+}

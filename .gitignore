@@ -1,0 +1,36 @@
+# Node.js
+**/node_modules/
+**/dist/
+**/.env
+**/.env.*
+**/*.log
+.node/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Flutter / Dart
+**/.dart-tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/generated_plugin_registrant.dart
+
+# Private / Secrets keys
+**/serviceAccountKey.json
+**/google-services.json
+**/*.jks
+**/*.keystore
+temp/
+downloads
+appDeployment
