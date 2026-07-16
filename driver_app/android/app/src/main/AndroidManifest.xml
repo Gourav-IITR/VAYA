@@ -14,9 +14,10 @@
 
 
 
+
     <application
         android:label="VAYA Driver"
-        android:name="${applicationName}"
+        android:name="io.flutter.app.FlutterApplication"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
 

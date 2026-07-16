@@ -17,3 +17,6 @@
 # Kotlin
 -keep class kotlin.** { *; }
 -keep class kotlinx.** { *; }
+
+# Play Core Splitcompat / Deferred Components
+-dontwarn com.google.android.play.core.**

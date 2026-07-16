@@ -1,0 +1,2 @@
+/Users/gouravmahunta/Desktop/GoodsDeliveryApp/driver_app/android/app/.cxx/release/3k4x3x3z/arm64-v8a/CMakeFiles/edit_cache.dir
+/Users/gouravmahunta/Desktop/GoodsDeliveryApp/driver_app/android/app/.cxx/release/3k4x3x3z/arm64-v8a/CMakeFiles/rebuild_cache.dir

@@ -42,7 +42,7 @@ class VayaDriverTheme {
       centerTitle: true,
       titleTextStyle: TextStyle(
         fontFamily: 'Outfit',
-        fontWeight: FontWeight.extrabold,
+        fontWeight: FontWeight.w800,
         fontSize: 18,
         letterSpacing: 0.5,
         color: signalCream,
@@ -58,7 +58,7 @@ class VayaDriverTheme {
         textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
       ),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: const Color(0xFF1A1A17),
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -273,7 +273,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                     style: TextStyle(
                       fontFamily: 'Outfit',
                       fontSize: 48,
-                      fontWeight: FontWeight.extrabold,
+                      fontWeight: FontWeight.w800,
                       color: Colors.white,
                     ),
                   ),

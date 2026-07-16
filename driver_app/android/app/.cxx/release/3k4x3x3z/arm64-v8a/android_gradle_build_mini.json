@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "/Users/gouravmahunta/flutter/packages/flutter_tools/gradle/src/main/scripts/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/gouravmahunta/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/Users/gouravmahunta/Desktop/GoodsDeliveryApp/driver_app/android/app/.cxx/release/3k4x3x3z/arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/gouravmahunta/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/Users/gouravmahunta/Desktop/GoodsDeliveryApp/driver_app/android/app/.cxx/release/3k4x3x3z/arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}
