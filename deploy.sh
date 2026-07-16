@@ -17,11 +17,10 @@ if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q
   echo "Please run: gcloud auth login"
   exit 1
 fi
-
 echo ">>> Checking Firebase CLI authentication..."
-if ! npx firebase-tools login --collect-analytics=false; then
-  echo "Error: Firebase authentication check failed."
-  exit 1
+if ! npx firebase-tools projects:list &>/dev/null; then
+  echo ">>> Firebase session expired or not authenticated. Logging in..."
+  npx firebase-tools login --no-localhost
 fi
 
 # 2. Gather deployment details
