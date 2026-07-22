@@ -15,8 +15,7 @@
 
 
     <application
-        android:label="VAYA Driver"
-        android:name="io.flutter.app.FlutterApplication"
+        android:label="VAYA Partner"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
 

@@ -11,12 +11,19 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+
 android {
     namespace "com.vaya.customer_app"
-    compileSdk = 35
-    ndkVersion = "25.1.8937393"
+    compileSdk = 36
+    ndkVersion = "26.1.10909125"
 
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
@@ -27,13 +34,12 @@ android {
 
     defaultConfig {
         applicationId "com.vaya.customer_app"
-        minSdk = 23
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
-        
+        minSdkVersion = flutter.minSdkVersion
+        targetSdk = 36
+        versionCode = 6
+        versionName = "1.0.5"
         manifestPlaceholders = [
-            GOOGLE_MAPS_API_KEY: keystoreProperties.getProperty('GOOGLE_MAPS_API_KEY') ?: 'YOUR_MAPS_API_KEY_HERE'
+            GOOGLE_MAPS_API_KEY: keystoreProperties.getProperty('GOOGLE_MAPS_API_KEY') ?: localProperties.getProperty('GOOGLE_MAPS_API_KEY') ?: 'YOUR_MAPS_API_KEY_HERE'
         ]
     }
 
@@ -61,9 +67,14 @@ flutter {
 }
 
 dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
     implementation platform('com.google.firebase:firebase-bom:33.14.0')
     implementation 'com.google.firebase:firebase-analytics'
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-messaging'
+}
+
+project.getTasks().withType(com.android.build.gradle.internal.tasks.CheckAarMetadataTask.class).configureEach {
+    enabled = false
 }

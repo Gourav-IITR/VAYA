@@ -42,7 +42,7 @@ class VayaTheme {
       centerTitle: true,
       titleTextStyle: TextStyle(
         fontFamily: 'Outfit',
-        fontWeight: FontWeight.extrabold,
+        fontWeight: FontWeight.w800,
         fontSize: 20,
         color: inkBlack,
         letterSpacing: 0.5,
@@ -58,7 +58,7 @@ class VayaTheme {
         textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
       ),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: Colors.white,
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -187,7 +187,7 @@ class LanguageSelectionScreen extends StatelessWidget {
                       style: TextStyle(
                         fontFamily: 'Outfit',
                         fontSize: 48,
-                        fontWeight: FontWeight.extrabold,
+                        fontWeight: FontWeight.w800,
                         color: Colors.white,
                       ),
                     ),
@@ -343,14 +343,16 @@ class _LoginScreenState extends State<LoginScreen> {
         final data = json.decode(res.body);
         if (mounted) {
           if (data['exists'] == true) {
-            Navigator.pushReplacement(
+            Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => const HomeScreen()),
+              (route) => false,
             );
           } else {
-            Navigator.pushReplacement(
+            Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+              (route) => false,
             );
           }
         }
@@ -468,9 +470,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       if (response.statusCode == 200) {
         if (mounted) {
-          Navigator.pushReplacement(
+          Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (_) => const HomeScreen()),
+            (route) => false,
           );
         }
       } else {
@@ -540,10 +543,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   LatLng _pickup = const LatLng(20.2961, 85.8245); // Master Canteen
   LatLng _dropoff = const LatLng(20.3150, 85.8178); // Patia
-  double _weight = 10;
-  String _selectedVehicle = 'bike';
-  bool _isLoading = false;
-  
   final Set<Marker> _markers = {};
   GoogleMapController? _mapController;
 
@@ -591,72 +590,60 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _handleBooking() async {
-    setState(() => _isLoading = true);
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      final token = await user.getIdToken();
-      final estimatedCost = _selectedVehicle == 'bike' ? 50.00 : (_selectedVehicle == 'ace' ? 250.00 : 800.00);
-      
-      final response = await http.post(
-        Uri.parse('$apiBaseUrl/api/booking'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token'
-        },
-        body: json.encode({
-          'pickupName': 'Selected Pickup Coordinates',
-          'pickupLat': _pickup.latitude,
-          'pickupLng': _pickup.longitude,
-          'dropoffName': 'Selected Dropoff Coordinates',
-          'dropoffLat': _dropoff.latitude,
-          'dropoffLng': _dropoff.longitude,
-          'vehicleType': _selectedVehicle,
-          'weight': _weight.round(),
-          'estimatedCost': estimatedCost
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => TrackingScreen(bookingId: data['booking']['id']),
-            ),
-          );
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to request booking. Please try again.')),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Connection error: $e')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final str = LocalizedStrings.of(context);
-    bool isBikeOk = _weight <= 20;
-    bool isAceOk = _weight <= 500;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('VΛYΛ'),
       ),
+      drawer: Drawer(
+        backgroundColor: VayaTheme.signalCream,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            UserAccountsDrawerHeader(
+              decoration: const BoxDecoration(
+                color: VayaTheme.saffron,
+              ),
+              accountName: Text(
+                FirebaseAuth.instance.currentUser?.displayName ?? 'VAYA Customer',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              accountEmail: Text(
+                FirebaseAuth.instance.currentUser?.phoneNumber ?? '',
+                style: const TextStyle(fontSize: 14),
+              ),
+              currentAccountPicture: const CircleAvatar(
+                backgroundColor: Colors.white,
+                child: Icon(Icons.person, color: VayaTheme.saffron, size: 36),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.home, color: VayaTheme.inkBlack),
+              title: const Text('Home'),
+              onTap: () => Navigator.pop(context),
+            ),
+            const Divider(color: VayaTheme.fog),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                await FirebaseAuth.instance.signOut();
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+      ),
       body: Column(
         children: [
           Expanded(
-            flex: 4,
             child: Stack(
               children: [
                 GoogleMap(
@@ -691,142 +678,264 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          Expanded(
-            flex: 5,
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                color: VayaTheme.signalCream,
-                border: Border(top: BorderSide(color: VayaTheme.fog, width: 1)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Weight Limit:', style: TextStyle(fontWeight: FontWeight.bold, color: VayaTheme.inkBlack)),
-                      Text('${_weight.round()} kg', style: const TextStyle(color: VayaTheme.saffron, fontWeight: FontWeight.extrabold, fontSize: 16)),
-                    ],
-                  ),
-                  Slider(
-                    min: 1,
-                    max: 2000,
-                    value: _weight,
-                    activeColor: VayaTheme.saffron,
-                    inactiveColor: VayaTheme.fog,
-                    onChanged: (val) {
-                      setState(() {
-                        _weight = val;
-                        if (val > 500) _selectedVehicle = 'truck';
-                        else if (val > 20 && _selectedVehicle == 'bike') _selectedVehicle = 'ace';
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('SELECT VEHICLE CLASS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2, color: VayaTheme.slate)),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: Row(
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: VayaTheme.signalCream,
+              border: Border(top: BorderSide(color: VayaTheme.fog, width: 1)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'CONFIRM DELIVERY LOCATIONS',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VehicleSelectionScreen(pickup: _pickup, dropoff: _dropoff),
+                      ),
+                    );
+                  },
+                  child: const Text('Next: Choose Vehicle'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 4b. Vehicle Selection Screen
+class VehicleSelectionScreen extends StatefulWidget {
+  final LatLng pickup;
+  final LatLng dropoff;
+  const VehicleSelectionScreen({super.key, required this.pickup, required this.dropoff});
+
+  @override
+  State<VehicleSelectionScreen> createState() => _VehicleSelectionScreenState();
+}
+
+class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
+  String _selectedVehicle = 'bike';
+  bool _isLoading = false;
+
+  Future<void> _handleBooking() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final token = await user.getIdToken();
+      final estimatedCost = _selectedVehicle == 'bike' ? 50.00 : (_selectedVehicle == 'ace' ? 250.00 : 800.00);
+      
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl/api/booking'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+        body: json.encode({
+          'pickupName': 'Selected Pickup Coordinates',
+          'pickupLat': widget.pickup.latitude,
+          'pickupLng': widget.pickup.longitude,
+          'dropoffName': 'Selected Dropoff Coordinates',
+          'dropoffLat': widget.dropoff.latitude,
+          'dropoffLng': widget.dropoff.longitude,
+          'vehicleType': _selectedVehicle,
+          'weight': 10,
+          'estimatedCost': estimatedCost
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TrackingScreen(bookingId: data['booking']['id']),
+            ),
+            (route) => route.isFirst,
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to request booking. Please try again.')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Connection error: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final str = LocalizedStrings.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Choose Vehicle'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        // Bike Card
-                        Expanded(
-                          child: InkWell(
-                            onTap: isBikeOk ? () => setState(() => _selectedVehicle = 'bike') : null,
-                            child: Opacity(
-                              opacity: isBikeOk ? 1.0 : 0.3,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: _selectedVehicle == 'bike' ? VayaTheme.saffron : VayaTheme.fog,
-                                    width: _selectedVehicle == 'bike' ? 2 : 1,
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: _selectedVehicle == 'bike' ? Colors.white : Colors.transparent,
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.motorcycle, size: 28, color: _selectedVehicle == 'bike' ? VayaTheme.saffron : VayaTheme.slate),
-                                    const SizedBox(height: 4),
-                                    Text(str.bike, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _selectedVehicle == 'bike' ? VayaTheme.inkBlack : VayaTheme.slate)),
-                                    const Text('< 20 kg', style: TextStyle(fontSize: 9, color: VayaTheme.slate)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+                        const Icon(Icons.location_on, color: VayaTheme.saffron),
                         const SizedBox(width: 8),
-                        // Tata Ace Card
                         Expanded(
-                          child: InkWell(
-                            onTap: isAceOk ? () => setState(() => _selectedVehicle = 'ace') : null,
-                            child: Opacity(
-                              opacity: isAceOk ? 1.0 : 0.3,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: _selectedVehicle == 'ace' ? VayaTheme.saffron : VayaTheme.fog,
-                                    width: _selectedVehicle == 'ace' ? 2 : 1,
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: _selectedVehicle == 'ace' ? Colors.white : Colors.transparent,
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.local_shipping, size: 28, color: _selectedVehicle == 'ace' ? VayaTheme.saffron : VayaTheme.slate),
-                                    const SizedBox(height: 4),
-                                    Text(str.miniTruck, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _selectedVehicle == 'ace' ? VayaTheme.inkBlack : VayaTheme.slate)),
-                                    const Text('< 500 kg', style: TextStyle(fontSize: 9, color: VayaTheme.slate)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Large Truck Card
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => setState(() => _selectedVehicle = 'truck'),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: _selectedVehicle == 'truck' ? VayaTheme.saffron : VayaTheme.fog,
-                                  width: _selectedVehicle == 'truck' ? 2 : 1,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                                color: _selectedVehicle == 'truck' ? Colors.white : Colors.transparent,
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.fire_truck, size: 28, color: _selectedVehicle == 'truck' ? VayaTheme.saffron : VayaTheme.slate),
-                                  const SizedBox(height: 4),
-                                  Text(str.largeTruck, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _selectedVehicle == 'truck' ? VayaTheme.inkBlack : VayaTheme.slate)),
-                                  const Text('< 2.0 t', style: TextStyle(fontSize: 9, color: VayaTheme.slate)),
-                                ],
-                              ),
-                            ),
+                          child: Text(
+                            'Pickup: (${widget.pickup.latitude.toStringAsFixed(4)}, ${widget.pickup.longitude.toStringAsFixed(4)})',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(Icons.flag, color: Colors.red),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Dropoff: (${widget.dropoff.latitude.toStringAsFixed(4)}, ${widget.dropoff.longitude.toStringAsFixed(4)})',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'SELECT VEHICLE CLASS',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView(
+                children: [
+                  _buildVehicleOption(
+                    id: 'bike',
+                    name: str.bike,
+                    desc: 'Quick deliveries up to 20 kg',
+                    price: '₹50.00',
+                    icon: Icons.motorcycle,
                   ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _handleBooking,
-                    child: _isLoading 
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Text(str.bookNow),
+                  const SizedBox(height: 12),
+                  _buildVehicleOption(
+                    id: 'ace',
+                    name: str.miniTruck,
+                    desc: 'Medium cargo up to 500 kg',
+                    price: '₹250.00',
+                    icon: Icons.local_shipping,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildVehicleOption(
+                    id: 'truck',
+                    name: str.largeTruck,
+                    desc: 'Heavy cargo up to 2,000 kg',
+                    price: '₹800.00',
+                    icon: Icons.fire_truck,
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _handleBooking,
+              child: _isLoading 
+                  ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                  : Text(str.bookNow),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVehicleOption({
+    required String id,
+    required String name,
+    required String desc,
+    required String price,
+    required IconData icon,
+  }) {
+    final isSelected = _selectedVehicle == id;
+    return InkWell(
+      onTap: () => setState(() => _selectedVehicle = id),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
+            width: isSelected ? 2 : 1,
           ),
-        ],
+          borderRadius: BorderRadius.circular(16),
+          color: isSelected ? Colors.white : Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isSelected ? VayaTheme.saffron.withOpacity(0.1) : VayaTheme.fog.withOpacity(0.3),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 32, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: isSelected ? VayaTheme.inkBlack : VayaTheme.slate,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    desc,
+                    style: const TextStyle(fontSize: 12, color: VayaTheme.slate),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              price,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -982,7 +1091,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   'STATUS: ${_status.toUpperCase()}',
                   style: const TextStyle(
                     fontSize: 16, 
-                    fontWeight: FontWeight.extrabold, 
+                    fontWeight: FontWeight.w800, 
                     color: VayaTheme.liveBlue,
                     letterSpacing: 1.2
                   ),

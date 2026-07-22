@@ -218,20 +218,23 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
           if (data['exists'] == true) {
             final driver = data['driver'];
             if (driver['is_approved'] == true) {
-              Navigator.pushReplacement(
+              Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => DriverHomeScreen(driverData: driver)),
+                (route) => false,
               );
             } else {
-              Navigator.pushReplacement(
+              Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => const PendingApprovalScreen()),
+                (route) => false,
               );
             }
           } else {
-            Navigator.pushReplacement(
+            Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => const DriverOnboardingScreen()),
+              (route) => false,
             );
           }
         }
@@ -803,6 +806,62 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             ),
           )
         ],
+      ),
+      drawer: Drawer(
+        backgroundColor: VayaDriverTheme.inkBlack,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            UserAccountsDrawerHeader(
+              decoration: const BoxDecoration(
+                color: VayaDriverTheme.saffron,
+              ),
+              accountName: Text(
+                widget.driverData['name'] ?? 'Driver Partner',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+              ),
+              accountEmail: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Vehicle: ${widget.driverData['vehicle_type']?.toUpperCase() ?? ''} (${widget.driverData['vehicle_reg'] ?? ''})',
+                    style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    FirebaseAuth.instance.currentUser?.phoneNumber ?? '',
+                    style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  ),
+                ],
+              ),
+              currentAccountPicture: const CircleAvatar(
+                backgroundColor: Colors.white,
+                child: Icon(Icons.drive_eta, color: VayaDriverTheme.saffron, size: 36),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.home, color: VayaDriverTheme.signalCream),
+              title: const Text('Home', style: TextStyle(color: VayaDriverTheme.signalCream)),
+              onTap: () => Navigator.pop(context),
+            ),
+            const Divider(color: VayaDriverTheme.slate),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                await _toggleOnline(false);
+                await FirebaseAuth.instance.signOut();
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
+                    (route) => false,
+                  );
+                }
+              },
+            ),
+          ],
+        ),
       ),
       body: _currentPosition == null
           ? const Center(child: CircularProgressIndicator())
