@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 // Configuration URL - Change to your Cloud Run URL in production
 const String apiBaseUrl = "https://vaya-backend-275777907648.us-central1.run.app";
 const String wsBaseUrl = "wss://vaya-backend-275777907648.us-central1.run.app";
@@ -147,7 +148,7 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
             if (driver['is_approved'] == true) {
               Navigator.pushAndRemoveUntil(
                 context,
-                MaterialPageRoute(builder: (_) => DriverHomeScreen(driverData: driver)),
+                MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: driver)),
                 (route) => false,
               );
             } else {
@@ -297,7 +298,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
             if (driver['is_approved'] == true) {
               Navigator.pushAndRemoveUntil(
                 context,
-                MaterialPageRoute(builder: (_) => DriverHomeScreen(driverData: driver)),
+                MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: driver)),
                 (route) => false,
               );
             } else {
@@ -332,7 +333,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('VΛYΛ Driver')),
+      appBar: AppBar(title: const Text('VΛYΛ Driver Partner')),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
@@ -583,10 +584,74 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
   }
 }
 
-/// 4. Driver Home Screen (Online/Offline Toggle, Map, WS alerts, active job)
+/// 4. Driver Main Navigation Screen (4-Tab Bottom Navigation)
+class DriverMainNavigation extends StatefulWidget {
+  final Map<String, dynamic> driverData;
+  const DriverMainNavigation({super.key, required this.driverData});
+
+  @override
+  State<DriverMainNavigation> createState() => _DriverMainNavigationState();
+}
+
+class _DriverMainNavigationState extends State<DriverMainNavigation> {
+  int _currentIndex = 0;
+  Map<String, dynamic>? _activeJob;
+
+  void _onJobStateChanged(Map<String, dynamic>? job) {
+    setState(() {
+      _activeJob = job;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // If an active trip is underway, switch to a full-screen operational trip flow (hiding bottom navigation)
+    if (_activeJob != null) {
+      return ActiveTripWorkflowScreen(
+        driverData: widget.driverData,
+        activeJob: _activeJob!,
+        onJobUpdated: (updated) => _onJobStateChanged(updated),
+      );
+    }
+
+    final pages = [
+      DriverHomeScreen(driverData: widget.driverData, onJobAccepted: (job) => _onJobStateChanged(job)),
+      DriverTripsScreen(driverData: widget.driverData),
+      DriverEarningsScreen(driverData: widget.driverData),
+      DriverAccountScreen(driverData: widget.driverData),
+    ];
+
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: pages,
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: const Color(0xFF1A1A17),
+        selectedItemColor: VayaDriverTheme.saffron,
+        unselectedItemColor: VayaDriverTheme.slate,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        unselectedLabelStyle: const TextStyle(fontSize: 12),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.local_shipping_outlined), activeIcon: Icon(Icons.local_shipping), label: 'Trips'),
+          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_outlined), activeIcon: Icon(Icons.account_balance_wallet), label: 'Earnings'),
+          BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'Account'),
+        ],
+      ),
+    );
+  }
+}
+
+/// 5. Driver Home Dashboard Screen
 class DriverHomeScreen extends StatefulWidget {
   final Map<String, dynamic> driverData;
-  const DriverHomeScreen({super.key, required this.driverData});
+  final Function(Map<String, dynamic>) onJobAccepted;
+
+  const DriverHomeScreen({super.key, required this.driverData, required this.onJobAccepted});
 
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
@@ -599,10 +664,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   IOWebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
 
-  // Active Job & Notification states
-  Map<String, dynamic>? _activeJob;
   Map<String, dynamic>? _incomingAlert;
   double _todayEarnings = 0.0;
+  int _completedTripsCount = 0;
   final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
   static const int _onlineNotificationId = 888;
 
@@ -656,21 +720,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Future<void> _updateOnlineNotification() async {
-    final androidDetails = AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'vaya_driver_online_status',
       'VAYA Partner Online Service',
       channelDescription: 'Persistent notification while driver is online',
       importance: Importance.low,
       priority: Priority.low,
-      ongoing: true, // STAYS in notification drawer while online
+      ongoing: true, // Persistent in drawer
       autoCancel: false,
       onlyAlertOnce: true,
       showWhen: false,
-      color: const Color(0xFFF26430),
+      color: Color(0xFFF26430),
       icon: '@mipmap/ic_launcher',
     );
 
-    final notificationDetails = NotificationDetails(android: androidDetails);
+    const notificationDetails = NotificationDetails(android: androidDetails);
     final String earningsText = '₹${_todayEarnings.toStringAsFixed(0)}';
 
     await _notificationsPlugin.show(
@@ -691,7 +755,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      // Show Google Play compliant Prominent Disclosure Dialog before system permission request
       final bool? proceed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -730,7 +793,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       );
 
       if (proceed != true) return;
-
       permission = await Geolocator.requestPermission();
     }
 
@@ -749,14 +811,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
   Future<void> _toggleOnline(bool online) async {
     if (online) {
-      // Check location permission with prominent disclosure if needed
       LocationPermission perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
         await _checkLocationPermission();
         perm = await Geolocator.checkPermission();
-        if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
-          return;
-        }
+        if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
       }
     }
 
@@ -813,7 +872,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         _currentPosition = LatLng(pos.latitude, pos.longitude);
       });
 
-      // Stream coordinates
       try {
         final user = FirebaseAuth.instance.currentUser;
         if (user == null) return;
@@ -857,7 +915,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         if (data['type'] == 'booking_created') {
           final booking = data['booking'];
           if (booking['vehicle_type'] == widget.driverData['vehicle_type'] && _isOnline) {
-            // Validate distance <= 3km
             if (_currentPosition != null && booking['pickup_lat'] != null) {
               final double dist = Geolocator.distanceBetween(
                 _currentPosition!.latitude,
@@ -865,7 +922,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 booking['pickup_lat'],
                 booking['pickup_lng'],
               );
-              if (dist <= 3000) { 
+              if (dist <= 5000) { 
                 setState(() {
                   _incomingAlert = booking;
                 });
@@ -901,10 +958,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
+        final acceptedJob = data['booking'];
         setState(() {
-          _activeJob = data['booking'];
           _incomingAlert = null;
         });
+        widget.onJobAccepted(acceptedJob);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to accept job. It may have expired or been taken.')),
@@ -914,57 +972,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error accepting job: $e')),
       );
-    }
-  }
-
-  Future<void> _updateJobStatus(String bookingId, String status) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-      final token = await user.getIdToken();
-
-      final res = await http.post(
-        Uri.parse('$apiBaseUrl/api/booking/status'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token'
-        },
-        body: json.encode({
-          'bookingId': bookingId,
-          'status': status
-        }),
-      );
-
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        if (status == 'completed' && _activeJob != null) {
-          final cost = double.tryParse(_activeJob!['estimated_cost'].toString()) ?? 0.0;
-          setState(() {
-            _todayEarnings += cost;
-            _activeJob = null;
-          });
-          if (_isOnline) {
-            _updateOnlineNotification();
-          }
-        } else {
-          setState(() {
-            if (status == 'cancelled') {
-              _activeJob = null;
-            } else {
-              _activeJob = data['booking'];
-            }
-          });
-        }
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating status: $e')));
-    }
-  }
-
-  Future<void> _launchCall(String phoneNo) async {
-    final url = Uri.parse('tel:$phoneNo');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url);
     }
   }
 
@@ -980,102 +987,98 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.driverData['name'] ?? 'Driver Home'),
-        actions: [
-          Switch(
-            value: _isOnline,
-            activeTrackColor: VayaDriverTheme.routeGreen,
-            onChanged: _toggleOnline,
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: Center(
-              child: Text(
-                _isOnline ? 'ONLINE' : 'OFFLINE',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold, 
-                  color: _isOnline ? VayaDriverTheme.routeGreen : VayaDriverTheme.slate
-                ),
-              ),
-            ),
-          )
-        ],
-      ),
-      drawer: Drawer(
-        backgroundColor: VayaDriverTheme.inkBlack,
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            UserAccountsDrawerHeader(
-              decoration: const BoxDecoration(
-                color: VayaDriverTheme.saffron,
-              ),
-              accountName: Text(
-                widget.driverData['name'] ?? 'Driver Partner',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
-              ),
-              accountEmail: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Vehicle: ${widget.driverData['vehicle_type']?.toUpperCase() ?? ''} (${widget.driverData['vehicle_reg'] ?? ''})',
-                    style: const TextStyle(fontSize: 13, color: Colors.white70),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    FirebaseAuth.instance.currentUser?.phoneNumber ?? '',
-                    style: const TextStyle(fontSize: 13, color: Colors.white70),
-                  ),
-                ],
-              ),
-              currentAccountPicture: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: VayaDriverTheme.inkBlack,
-                  border: Border.all(color: Colors.white24, width: 2),
-                ),
-                child: const Icon(Icons.drive_eta, color: VayaDriverTheme.saffron, size: 36),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.home, color: VayaDriverTheme.signalCream),
-              title: const Text('Home', style: TextStyle(color: VayaDriverTheme.signalCream)),
-              onTap: () => Navigator.pop(context),
-            ),
-            const Divider(color: VayaDriverTheme.slate),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-              onTap: () async {
-                await _toggleOnline(false);
-                await FirebaseAuth.instance.signOut();
-                if (context.mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
-                    (route) => false,
-                  );
-                }
-              },
-            ),
-          ],
-        ),
+        title: Text(widget.driverData['name'] ?? 'Driver Dashboard'),
       ),
       body: _currentPosition == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: VayaDriverTheme.saffron))
           : Stack(
               children: [
                 GoogleMap(
-                  initialCameraPosition: CameraPosition(
-                    target: _currentPosition!,
-                    zoom: 14,
-                  ),
+                  initialCameraPosition: CameraPosition(target: _currentPosition!, zoom: 14),
                   myLocationEnabled: _isOnline,
                   myLocationButtonEnabled: true,
                   onMapCreated: (c) => _mapController = c,
                 ),
 
-                // Incoming Order Card Alert
+                // Top Dashboard Cards (Online Switch & Today's Earnings Summary)
+                Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: Column(
+                    children: [
+                      // Online / Offline Switch Card
+                      Card(
+                        color: const Color(0xFF1A1A17),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: _isOnline ? VayaDriverTheme.routeGreen : VayaDriverTheme.slate,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    _isOnline ? 'YOU ARE ONLINE' : 'YOU ARE OFFLINE',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: _isOnline ? VayaDriverTheme.routeGreen : VayaDriverTheme.signalCream,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Switch(
+                                value: _isOnline,
+                                activeTrackColor: VayaDriverTheme.routeGreen,
+                                onChanged: _toggleOnline,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Today's Earnings Summary Card
+                      Card(
+                        color: const Color(0xFF1A1A17),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              Column(
+                                children: [
+                                  const Text("TODAY'S EARNINGS", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream)),
+                                  const SizedBox(height: 4),
+                                  Text("₹${_todayEarnings.toStringAsFixed(0)}", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: VayaDriverTheme.saffron)),
+                                ],
+                              ),
+                              Container(height: 30, width: 1, color: VayaDriverTheme.slate),
+                              Column(
+                                children: [
+                                  const Text("COMPLETED TRIPS", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream)),
+                                  const SizedBox(height: 4),
+                                  Text("$_completedTripsCount", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: VayaDriverTheme.signalCream)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Incoming Order Overlay Request Card
                 if (_incomingAlert != null)
                   Positioned(
                     bottom: 24,
@@ -1083,8 +1086,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     right: 16,
                     child: Card(
                       color: const Color(0xFF1A1A17),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: const BorderSide(color: VayaDriverTheme.saffron, width: 2),
+                      ),
                       child: Padding(
-                        padding: const EdgeInsets.all(16.0),
+                        padding: const EdgeInsets.all(20.0),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           mainAxisSize: MainAxisSize.min,
@@ -1092,165 +1099,419 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('New Delivery Near You', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaDriverTheme.signalCream)),
-                                IconButton(
-                                  icon: const Icon(Icons.close, color: VayaDriverTheme.slate),
-                                  onPressed: () => setState(() => _incomingAlert = null),
-                                )
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: VayaDriverTheme.saffron.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Text('NEW CARGO REQUEST', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaDriverTheme.saffron)),
+                                ),
+                                Text(
+                                  '₹${_incomingAlert!['estimated_cost']}',
+                                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: VayaDriverTheme.saffron),
+                                ),
                               ],
                             ),
-                            const Divider(color: VayaDriverTheme.slate),
-                            Text('Pickup: ${_incomingAlert!['pickup_name']}', style: const TextStyle(fontSize: 14, color: VayaDriverTheme.signalCream)),
+                            const Divider(color: VayaDriverTheme.slate, height: 24),
+                            Text('Pickup: ${_incomingAlert!['pickup_name']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream)),
+                            const SizedBox(height: 4),
                             Text('Dropoff: ${_incomingAlert!['dropoff_name']}', style: const TextStyle(fontSize: 14, color: VayaDriverTheme.signalCream)),
-                            const SizedBox(height: 6),
-                            Text('Weight: ${_incomingAlert!['weight']} kg • Est: ₹${_incomingAlert!['estimated_cost']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: VayaDriverTheme.saffron)),
-                            const SizedBox(height: 12),
-                            ElevatedButton(
-                              onPressed: () => _acceptJob(_incomingAlert!['id']),
-                              child: const Text('Accept Delivery Job'),
-                            )
+                            const SizedBox(height: 8),
+                            Text('Cargo Weight: ${_incomingAlert!['weight']} kg', style: const TextStyle(fontSize: 12, color: VayaDriverTheme.signalCream)),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red)),
+                                    onPressed: () => setState(() => _incomingAlert = null),
+                                    child: const Text('Reject', style: TextStyle(color: Colors.red)),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  flex: 2,
+                                  child: ElevatedButton(
+                                    onPressed: () => _acceptJob(_incomingAlert!['id']),
+                                    child: const Text('ACCEPT TRIP'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
                     ),
                   ),
-
-                // Active Job Navigation Panel
-                if (_activeJob != null)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF1A1A17),
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                        border: Border(top: BorderSide(color: VayaDriverTheme.slate, width: 1)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _activeJob!['status'] == 'accepted' || _activeJob!['status'] == 'arrived_pickup'
-                                    ? 'Navigating to Pickup'
-                                    : 'Navigating to Dropoff',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaDriverTheme.saffron),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.call, color: VayaDriverTheme.routeGreen),
-                                onPressed: () => _launchCall(_activeJob!['customer_phone'] ?? '9876543210'),
-                              )
-                            ],
-                          ),
-                          const Divider(color: VayaDriverTheme.slate),
-                          Text(
-                            _activeJob!['status'] == 'accepted' || _activeJob!['status'] == 'arrived_pickup'
-                                ? 'Pickup: ${_activeJob!['pickup_name']}'
-                                : 'Dropoff: ${_activeJob!['dropoff_name']}',
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: VayaDriverTheme.signalCream),
-                          ),
-                          const SizedBox(height: 16),
-                          
-                          if (_activeJob!['status'] == 'accepted')
-                            ElevatedButton(
-                              onPressed: () => _updateJobStatus(_activeJob!['id'], 'arrived_pickup'),
-                              child: const Text('Arrived at Pickup Location'),
-                            )
-                          else if (_activeJob!['status'] == 'arrived_pickup')
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.liveBlue),
-                              onPressed: () => _showOtpDialog(_activeJob!['id']),
-                              child: const Text('Verify Customer OTP & Load Cargo'),
-                            )
-                          else if (_activeJob!['status'] == 'dropping_off')
-                            ElevatedButton(
-                              onPressed: () => _updateJobStatus(_activeJob!['id'], 'arrived_dropoff'),
-                              child: const Text('Arrived at Dropoff Location'),
-                            )
-                          else if (_activeJob!['status'] == 'arrived_dropoff')
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.routeGreen),
-                              onPressed: () => _updateJobStatus(_activeJob!['id'], 'completed'),
-                              child: const Text('Complete Delivery & Collect Cash'),
-                            )
-                        ],
-                      ),
-                    ),
-                  )
               ],
             ),
     );
   }
+}
 
-  void _showOtpDialog(String bookingId) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A17),
-        title: const Text('Verify Pickup OTP', style: TextStyle(color: VayaDriverTheme.signalCream)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+/// 6. Full-Screen Active Trip Operational Workflow
+class ActiveTripWorkflowScreen extends StatefulWidget {
+  final Map<String, dynamic> driverData;
+  final Map<String, dynamic> activeJob;
+  final Function(Map<String, dynamic>?) onJobUpdated;
+
+  const ActiveTripWorkflowScreen({
+    super.key,
+    required this.driverData,
+    required this.activeJob,
+    required this.onJobUpdated,
+  });
+
+  @override
+  State<ActiveTripWorkflowScreen> createState() => _ActiveTripWorkflowScreenState();
+}
+
+class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
+  late Map<String, dynamic> _job;
+  final TextEditingController _otpController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _job = widget.activeJob;
+  }
+
+  Future<void> _updateStatus(String newStatus) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/api/booking/status'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+        body: json.encode({
+          'bookingId': _job['id'],
+          'status': newStatus
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (newStatus == 'completed' || newStatus == 'cancelled') {
+          widget.onJobUpdated(null);
+        } else {
+          setState(() {
+            _job = data['booking'];
+          });
+          widget.onJobUpdated(_job);
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _verifyOtp() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/api/booking/verify-pickup'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+        body: json.encode({
+          'bookingId': _job['id'],
+          'otp': _otpController.text.trim()
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        setState(() {
+          _job = data['booking'];
+        });
+        widget.onJobUpdated(_job);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid OTP code. Please try again.')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Verification error: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _job['status'] ?? 'accepted';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Trip #${_job['id'].toString().substring(0, 8).toUpperCase()}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.call, color: VayaDriverTheme.routeGreen),
+            onPressed: () async {
+              final url = Uri.parse('tel:9876543210');
+              if (await canLaunchUrl(url)) await launchUrl(url);
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: GoogleMap(
+              initialCameraPosition: CameraPosition(
+                target: LatLng(
+                  double.parse(_job['pickup_lat']?.toString() ?? '20.2961'),
+                  double.parse(_job['pickup_lng']?.toString() ?? '85.8245'),
+                ),
+                zoom: 14,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: Color(0xFF1A1A17),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              border: Border(top: BorderSide(color: VayaDriverTheme.slate, width: 1)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      status == 'accepted' ? 'NAVIGATE TO PICKUP' : (status == 'dropping_off' ? 'NAVIGATE TO DROPOFF' : status.toUpperCase()),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaDriverTheme.saffron),
+                    ),
+                    Text('Fare: ₹${_job['estimated_cost']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: VayaDriverTheme.signalCream)),
+                  ],
+                ),
+                const Divider(color: VayaDriverTheme.slate, height: 20),
+                Text('Pickup: ${_job['pickup_name']}', style: const TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream)),
+                const SizedBox(height: 4),
+                Text('Dropoff: ${_job['dropoff_name']}', style: const TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream)),
+                const SizedBox(height: 16),
+
+                if (status == 'accepted') ...[
+                  ElevatedButton(
+                    onPressed: () => _updateStatus('arrived_pickup'),
+                    child: const Text('Arrived at Pickup Location'),
+                  ),
+                ] else if (status == 'arrived_pickup') ...[
+                  TextField(
+                    controller: _otpController,
+                    maxLength: 6,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(letterSpacing: 8, fontSize: 20, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(labelText: 'Enter Customer Pickup OTP'),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.liveBlue),
+                    onPressed: _verifyOtp,
+                    child: const Text('Verify OTP & Start Trip'),
+                  ),
+                ] else if (status == 'dropping_off') ...[
+                  ElevatedButton(
+                    onPressed: () => _updateStatus('arrived_dropoff'),
+                    child: const Text('Arrived at Dropoff Location'),
+                  ),
+                ] else if (status == 'arrived_dropoff') ...[
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.routeGreen),
+                    onPressed: () => _updateStatus('completed'),
+                    child: const Text('Complete Delivery & Collect Cash'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 7. Driver Trips History Screen (Trips Tab)
+class DriverTripsScreen extends StatelessWidget {
+  final Map<String, dynamic> driverData;
+  const DriverTripsScreen({super.key, required this.driverData});
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Trip History'),
+          bottom: const TabBar(
+            labelColor: VayaDriverTheme.saffron,
+            indicatorColor: VayaDriverTheme.saffron,
+            tabs: [
+              Tab(text: 'Completed'),
+              Tab(text: 'Cancelled'),
+            ],
+          ),
+        ),
+        body: TabBarView(
           children: [
-            const Text('Enter the 6-digit OTP code provided by the sender.', style: TextStyle(color: VayaDriverTheme.signalCream)),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              maxLength: 6,
-              style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 8),
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              decoration: const InputDecoration(hintText: '000000'),
-            )
+            Padding(
+              padding: EdgeInsets.all(16.0),
+              child: ListView(
+                children: [
+                  Card(
+                    child: ListTile(
+                      leading: Icon(Icons.check_circle, color: VayaDriverTheme.routeGreen),
+                      title: Text('Trip #VY-81920', style: TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('Master Canteen -> Saheed Nagar • ₹160'),
+                      trailing: Text('Completed', style: TextStyle(color: VayaDriverTheme.routeGreen, fontSize: 11)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Center(child: Text('No cancelled trips.', style: TextStyle(color: VayaDriverTheme.slate))),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: VayaDriverTheme.slate)),
+      ),
+    );
+  }
+}
+
+/// 8. Driver Earnings & Payouts Screen (Earnings Tab)
+class DriverEarningsScreen extends StatelessWidget {
+  final Map<String, dynamic> driverData;
+  const DriverEarningsScreen({super.key, required this.driverData});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Earnings & Payouts')),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              color: const Color(0xFF1A1A17),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('THIS WEEK\'S EARNINGS', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 11, letterSpacing: 1.0)),
+                    const SizedBox(height: 8),
+                    const Text('₹2,450.00', style: TextStyle(color: VayaDriverTheme.saffron, fontSize: 32, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: const [
+                        Text('Trips Completed: 12', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 12)),
+                        Text('Payout Status: Settled', style: TextStyle(color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text('EARNINGS BREAKDOWN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaDriverTheme.slate)),
+            const SizedBox(height: 12),
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.local_taxi, color: VayaDriverTheme.saffron),
+                title: Text('Trip Gross Fares'),
+                trailing: Text('₹2,600.00', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.card_giftcard, color: VayaDriverTheme.routeGreen),
+                title: Text('Incentives & Bonuses'),
+                trailing: Text('+₹200.00', style: TextStyle(fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen)),
+              ),
+            ),
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.remove_circle_outline, color: Colors.red),
+                title: Text('Platform Fee (10%)'),
+                trailing: Text('-₹350.00', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 9. Driver Account & Vehicle Settings Screen (Account Tab)
+class DriverAccountScreen extends StatelessWidget {
+  final Map<String, dynamic> driverData;
+  const DriverAccountScreen({super.key, required this.driverData});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Partner Account')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Card(
+            child: ListTile(
+              leading: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: VayaDriverTheme.inkBlack,
+                  border: Border.all(color: Colors.white24, width: 2),
+                ),
+                child: const Icon(Icons.drive_eta, color: VayaDriverTheme.saffron, size: 32),
+              ),
+              title: Text(driverData['name'] ?? 'Driver Partner', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('Plate: ${driverData['vehicle_reg'] ?? ''} • Class: ${driverData['vehicle_type']?.toString().toUpperCase()}'),
+            ),
           ),
-          TextButton(
-            onPressed: () async {
-              try {
-                final user = FirebaseAuth.instance.currentUser;
-                if (user == null) return;
-                final token = await user.getIdToken();
-
-                final res = await http.post(
-                  Uri.parse('$apiBaseUrl/api/booking/verify-pickup'),
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer $token'
-                  },
-                  body: json.encode({
-                    'bookingId': bookingId,
-                    'otp': controller.text.trim()
-                  }),
+          const SizedBox(height: 20),
+          const ListTile(
+            leading: Icon(Icons.verified, color: VayaDriverTheme.routeGreen),
+            title: Text('Document Verification Status'),
+            subtitle: Text('Driving License & Vehicle RC Verified'),
+            trailing: Icon(Icons.check_circle, color: VayaDriverTheme.routeGreen),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.account_balance, color: VayaDriverTheme.liveBlue),
+            title: Text('Bank Account & Payout Details'),
+            subtitle: Text('Direct Bank Transfer (Active)'),
+            trailing: Icon(Icons.chevron_right),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            onTap: () async {
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
+                  (route) => false,
                 );
-
-                if (res.statusCode == 200) {
-                  final data = json.decode(res.body);
-                  Navigator.pop(ctx);
-                  setState(() {
-                    _activeJob = data['booking'];
-                  });
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Invalid code. Please try again.')),
-                  );
-                }
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Verification error: $e')));
               }
             },
-            child: const Text('Verify & Start Trip', style: TextStyle(color: VayaDriverTheme.saffron, fontWeight: FontWeight.bold)),
-          )
+          ),
         ],
       ),
     );

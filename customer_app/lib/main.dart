@@ -8,11 +8,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
-// Configuration URL - Change to your Cloud Run URL in production
+
+// Configuration URLs - Change to your Cloud Run URL in production
 const String apiBaseUrl = "https://vaya-backend-275777907648.us-central1.run.app";
 const String wsBaseUrl = "wss://vaya-backend-275777907648.us-central1.run.app";
 
-// VAYA Brand Design Tokens
+// VAYA Brand Design Tokens (Saffron / InkBlack / SignalCream / RouteGreen)
 class VayaTheme {
   static const Color saffron = Color(0xFFF26430);
   static const Color inkBlack = Color(0xFF0E0E0C);
@@ -26,11 +27,9 @@ class VayaTheme {
     useMaterial3: true,
     fontFamily: 'Inter',
     scaffoldBackgroundColor: signalCream,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: saffron,
+    colorScheme: const ColorScheme.light(
       primary: saffron,
       secondary: slate,
-      background: signalCream,
       surface: Colors.white,
       onPrimary: Colors.white,
       onSurface: inkBlack,
@@ -115,7 +114,7 @@ class _VayaCustomerAppState extends State<VayaCustomerApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'VAYA',
+      title: 'VAYA Logistics',
       debugShowCheckedModeBanner: false,
       theme: VayaTheme.themeData,
       locale: _locale,
@@ -170,7 +169,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           if (data['exists'] == true) {
             Navigator.pushAndRemoveUntil(
               context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
+              MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
               (route) => false,
             );
           } else {
@@ -223,11 +222,8 @@ class LocalizedStrings {
   String get enterMobile => locale.languageCode == 'or' ? '୧୦-ଅଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ଦିଅନ୍ତୁ' : locale.languageCode == 'hi' ? '10-अंकीय मोबाइल नंबर दर्ज करें' : 'Enter 10-digit Mobile Number';
   String get sendOtp => locale.languageCode == 'or' ? 'OTP ପଠାନ୍ତୁ' : locale.languageCode == 'hi' ? 'ओटीपी भेजें' : 'Send OTP';
   String get verifyOtp => locale.languageCode == 'or' ? 'OTP ଯାଞ୍ଚ କରନ୍ତୁ' : locale.languageCode == 'hi' ? 'ओटीपी सत्यापित करें' : 'Verify OTP';
-  String get bike => locale.languageCode == 'or' ? 'ବାଇକ୍' : locale.languageCode == 'hi' ? 'बाइक' : 'Bike';
-  String get miniTruck => locale.languageCode == 'or' ? 'ମିନି ଟ୍ରକ୍ (ଟାଟା ଏସି)' : locale.languageCode == 'hi' ? 'मिनी ट्रक (टाटा एस)' : 'Mini Truck (Tata Ace)';
-  String get largeTruck => locale.languageCode == 'or' ? 'ବଡ଼ ଟ୍ରକ୍ (ଟାଟା ୪୦୭)' : locale.languageCode == 'hi' ? 'बड़ा ट्रक (टाटा 407)' : 'Large Truck (Tata 407)';
   String get bookNow => locale.languageCode == 'or' ? 'ବୁକିଂ କରନ୍ତୁ' : locale.languageCode == 'hi' ? 'बुकिंग करें' : 'Book a VAYA';
-  String get tracking => locale.languageCode == 'or' ? 'ବୁକିଂ ଟ୍ରାକ୍' : locale.languageCode == 'hi' ? 'ଟ୍ରାକିଂ' : 'Track VAYA';
+  String get tracking => locale.languageCode == 'or' ? 'ବୁକିଂ ଟ୍ରାକ୍' : locale.languageCode == 'hi' ? 'ट्रैकिंग' : 'Track VAYA';
 }
 
 /// 1. Language Picker Screen
@@ -246,7 +242,6 @@ class LanguageSelectionScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Stylized V symbol instead of translation icon
               Center(
                 child: Container(
                   width: 80,
@@ -419,7 +414,7 @@ class _LoginScreenState extends State<LoginScreen> {
           if (data['exists'] == true) {
             Navigator.pushAndRemoveUntil(
               context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
+              MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
               (route) => false,
             );
           } else {
@@ -546,7 +541,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
+            MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
             (route) => false,
           );
         }
@@ -606,7 +601,224 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-/// 4. Booking Map Selection Screen
+/// 4. Main Navigation Screen (4-Tab Persistent Bottom Navigation Bar)
+class MainNavigationScreen extends StatefulWidget {
+  const MainNavigationScreen({super.key});
+
+  @override
+  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
+}
+
+class _MainNavigationScreenState extends State<MainNavigationScreen> {
+  int _currentIndex = 0;
+  Map<String, dynamic>? _activeBooking;
+  Timer? _activeBookingCheckTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkActiveBooking();
+    _activeBookingCheckTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _checkActiveBooking();
+    });
+  }
+
+  @override
+  void dispose() {
+    _activeBookingCheckTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkActiveBooking() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/booking/active'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted) {
+          setState(() {
+            if (data['exists'] == true) {
+              _activeBooking = data['booking'];
+            } else {
+              _activeBooking = null;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error checking active booking: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> pages = [
+      const HomeScreen(),
+      OrdersScreen(onTrackActive: () {
+        if (_activeBooking != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => TrackingScreen(bookingId: _activeBooking!['id'])),
+          ).then((_) => _checkActiveBooking());
+        }
+      }),
+      const PaymentsScreen(),
+      const AccountScreen(),
+    ];
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: _currentIndex,
+            children: pages,
+          ),
+
+          // Persistent "Track Active Order" card above bottom navigation
+          if (_activeBooking != null && _currentIndex != 1)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 80,
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => TrackingScreen(bookingId: _activeBooking!['id'])),
+                  ).then((_) => _checkActiveBooking());
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: VayaTheme.inkBlack,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: VayaTheme.saffron.withOpacity(0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.local_shipping, color: VayaTheme.saffron, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                const Text(
+                                  'ACTIVE DELIVERY',
+                                  style: TextStyle(
+                                    color: VayaTheme.saffron,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.0,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: const BoxDecoration(
+                                    color: VayaTheme.routeGreen,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${_activeBooking!['vehicle_type']?.toString().toUpperCase()} • Status: ${_activeBooking!['status']}',
+                              style: const TextStyle(
+                                color: VayaTheme.signalCream,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, color: VayaTheme.signalCream, size: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: VayaTheme.saffron,
+        unselectedItemColor: VayaTheme.slate,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        unselectedLabelStyle: const TextStyle(fontSize: 12),
+        items: [
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home, color: VayaTheme.saffron),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Stack(
+              children: [
+                const Icon(Icons.receipt_long_outlined),
+                if (_activeBooking != null)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: VayaTheme.saffron,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            activeIcon: const Icon(Icons.receipt_long, color: VayaTheme.saffron),
+            label: 'Orders',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            activeIcon: Icon(Icons.account_balance_wallet, color: VayaTheme.saffron),
+            label: 'Payments',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            activeIcon: Icon(Icons.person, color: VayaTheme.saffron),
+            label: 'Account',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 5. Home Tab Screen (Two-Point Search & Interactive Map)
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -615,22 +827,19 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  LatLng _pickup = const LatLng(20.2961, 85.8245); // Master Canteen
-  LatLng _dropoff = const LatLng(20.3150, 85.8178); // Patia
+  LatLng _pickup = const LatLng(20.2961, 85.8245); // Master Canteen, Bhubaneswar
+  LatLng _dropoff = const LatLng(20.3150, 85.8178); // Patia, Bhubaneswar
   final Set<Marker> _markers = {};
   GoogleMapController? _mapController;
 
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _dropoffController = TextEditingController();
-  List<Map<String, dynamic>> _searchResults = [];
-  String _searchFieldType = '';
-  Timer? _debounceTimer;
+  bool _isLocating = true;
 
   @override
   void initState() {
     super.initState();
     _updateMarkers();
-    _initDefaultAddresses();
     _locateUserPosition();
   }
 
@@ -638,47 +847,42 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _pickupController.dispose();
     _dropoffController.dispose();
-    _debounceTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _initDefaultAddresses() async {
-    final pAddr = await getAddressFromCoords(_pickup.latitude, _pickup.longitude);
-    final dAddr = await getAddressFromCoords(_dropoff.latitude, _dropoff.longitude);
-    if (mounted) {
-      setState(() {
-        _pickupController.text = pAddr;
-        _dropoffController.text = dAddr;
-      });
-    }
-  }
-
   Future<void> _locateUserPosition() async {
+    setState(() => _isLocating = true);
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-        Position pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+        Position pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        );
         final coords = LatLng(pos.latitude, pos.longitude);
-        setState(() {
-          _pickup = coords;
-          _updateMarkers();
-        });
+        _pickup = coords;
+        _updateMarkers();
         _mapController?.animateCamera(CameraUpdate.newLatLngZoom(coords, 14));
-        
-        final addr = await getAddressFromCoords(pos.latitude, pos.longitude);
-        setState(() {
-          _pickupController.text = addr;
-        });
+
+        final addr = await _reverseGeocode(pos.latitude, pos.longitude);
+        if (mounted) {
+          setState(() {
+            _pickupController.text = addr;
+            _isLocating = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isLocating = false);
       }
     } catch (e) {
-      debugPrint("Could not retrieve current location: $e");
+      debugPrint("Error locating user: $e");
+      if (mounted) setState(() => _isLocating = false);
     }
   }
 
-  Future<String> getAddressFromCoords(double lat, double lng) async {
+  Future<String> _reverseGeocode(double lat, double lng) async {
     final url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng';
     try {
       final response = await http.get(
@@ -690,55 +894,12 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['display_name'] ?? '(${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})';
+        return data['display_name'] ?? '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
       }
     } catch (e) {
-      debugPrint("Reverse geocoding error: $e");
+      debugPrint("Reverse geocode error: $e");
     }
-    return '(${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})';
-  }
-
-  Future<List<Map<String, dynamic>>> searchLocations(String query) async {
-    if (query.trim().length < 2) return [];
-    final viewbox = '85.70,20.40,85.95,20.20';
-    final url = 'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&viewbox=$viewbox&bounded=1&limit=6';
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Accept-Language': 'en',
-          'User-Agent': 'VAYACustomerApp/1.0 (com.vaya.customer_app)',
-        },
-      );
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((d) => {
-          'display_name': d['display_name'] as String,
-          'lat': double.parse(d['lat'] as String),
-          'lon': double.parse(d['lon'] as String),
-        }).toList();
-      }
-    } catch (e) {
-      debugPrint("Autocomplete search error: $e");
-    }
-    return [];
-  }
-
-  void _onSearchChanged(String query, String type) {
-    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 500), () async {
-      if (query.trim().length < 2) {
-        setState(() {
-          _searchResults.clear();
-        });
-        return;
-      }
-      final results = await searchLocations(query);
-      setState(() {
-        _searchFieldType = type;
-        _searchResults = results;
-      });
-    });
+    return '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
   }
 
   void _updateMarkers() {
@@ -747,16 +908,65 @@ class _HomeScreenState extends State<HomeScreen> {
       _markers.add(Marker(
         markerId: const MarkerId('pickup'),
         position: _pickup,
-        infoWindow: const InfoWindow(title: 'Pickup Point'),
+        infoWindow: const InfoWindow(title: 'Pickup Location'),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
       ));
       _markers.add(Marker(
         markerId: const MarkerId('dropoff'),
         position: _dropoff,
-        infoWindow: const InfoWindow(title: 'Dropoff Point'),
+        infoWindow: const InfoWindow(title: 'Destination Location'),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
       ));
     });
+    _fitRouteBounds();
+  }
+
+  void _fitRouteBounds() {
+    if (_mapController == null) return;
+    final bounds = LatLngBounds(
+      southwest: LatLng(
+        _pickup.latitude < _dropoff.latitude ? _pickup.latitude : _dropoff.latitude,
+        _pickup.longitude < _dropoff.longitude ? _pickup.longitude : _dropoff.longitude,
+      ),
+      northeast: LatLng(
+        _pickup.latitude > _dropoff.latitude ? _pickup.latitude : _dropoff.latitude,
+        _pickup.longitude > _dropoff.longitude ? _pickup.longitude : _dropoff.longitude,
+      ),
+    );
+    _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+  }
+
+  void _openLocationSearchModal(String fieldType) async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FullScreenLocationSearch(
+          initialType: fieldType,
+          currentLocation: _pickup,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      final LatLng newPos = result['coords'];
+      final String address = result['address'];
+
+      setState(() {
+        if (fieldType == 'pickup') {
+          _pickup = newPos;
+          _pickupController.text = address;
+        } else {
+          _dropoff = newPos;
+          _dropoffController.text = address;
+        }
+        _updateMarkers();
+      });
+
+      // Auto-switch focus: If pickup was just selected, prompt for destination
+      if (fieldType == 'pickup' && _dropoffController.text.isEmpty) {
+        _openLocationSearchModal('destination');
+      }
+    }
   }
 
   @override
@@ -764,57 +974,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('VΛYΛ'),
-      ),
-      drawer: Drawer(
-        backgroundColor: VayaTheme.signalCream,
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            UserAccountsDrawerHeader(
-              decoration: const BoxDecoration(
-                color: VayaTheme.saffron,
-              ),
-              accountName: Text(
-                FirebaseAuth.instance.currentUser?.displayName ?? 'VAYA Customer',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              accountEmail: Text(
-                FirebaseAuth.instance.currentUser?.phoneNumber ?? '',
-                style: const TextStyle(fontSize: 14),
-              ),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(Icons.person, color: VayaTheme.saffron, size: 36),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.home, color: VayaTheme.inkBlack),
-              title: const Text('Home'),
-              onTap: () => Navigator.pop(context),
-            ),
-            const Divider(color: VayaTheme.fog),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-              onTap: () async {
-                await FirebaseAuth.instance.signOut();
-                if (context.mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                    (route) => false,
-                  );
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.white,
-        foregroundColor: VayaTheme.saffron,
-        onPressed: _locateUserPosition,
-        child: const Icon(Icons.gps_fixed),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.my_location, color: VayaTheme.saffron),
+            onPressed: _locateUserPosition,
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -822,53 +987,69 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(
                 child: GoogleMap(
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(20.2961, 85.8245),
-                    zoom: 12,
+                  initialCameraPosition: CameraPosition(
+                    target: _pickup,
+                    zoom: 13,
                   ),
                   markers: _markers,
+                  myLocationEnabled: true,
                   myLocationButtonEnabled: false,
-                  onMapCreated: (c) => _mapController = c,
+                  onMapCreated: (c) {
+                    _mapController = c;
+                    _fitRouteBounds();
+                  },
                   onTap: (latLng) async {
-                    if (_markers.length < 2) {
+                    final addr = await _reverseGeocode(latLng.latitude, latLng.longitude);
+                    setState(() {
                       _dropoff = latLng;
-                      final addr = await getAddressFromCoords(latLng.latitude, latLng.longitude);
-                      setState(() => _dropoffController.text = addr);
-                    } else {
-                      _pickup = latLng;
-                      final addr = await getAddressFromCoords(latLng.latitude, latLng.longitude);
-                      setState(() => _pickupController.text = addr);
-                    }
-                    _updateMarkers();
+                      _dropoffController.text = addr;
+                      _updateMarkers();
+                    });
                   },
                 ),
               ),
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 decoration: const BoxDecoration(
-                  color: VayaTheme.signalCream,
-                  border: Border(top: BorderSide(color: VayaTheme.fog, width: 1)),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2)),
+                  ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    ElevatedButton(
+                    ElevatedButton.icon(
                       onPressed: () {
+                        if (_pickupController.text.isEmpty || _dropoffController.text.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please select both Pickup and Destination points')),
+                          );
+                          return;
+                        }
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => VehicleSelectionScreen(pickup: _pickup, dropoff: _dropoff),
+                            builder: (_) => VehicleSelectionScreen(
+                              pickup: _pickup,
+                              pickupAddress: _pickupController.text,
+                              dropoff: _dropoff,
+                              dropoffAddress: _dropoffController.text,
+                            ),
                           ),
                         );
                       },
-                      child: const Text('Next: Choose Vehicle'),
+                      icon: const Icon(Icons.local_shipping),
+                      label: const Text('Next: Choose Vehicle & Price'),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          // Search Locations Float Card
+
+          // Search Card Float Overlay
           Positioned(
             top: 16,
             left: 16,
@@ -880,79 +1061,258 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   children: [
-                    TextField(
-                      controller: _pickupController,
-                      style: const TextStyle(fontSize: 14, color: VayaTheme.inkBlack),
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.location_on, color: VayaTheme.saffron),
-                        hintText: 'Search Pickup Location (From)',
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.gps_fixed, color: VayaTheme.saffron),
-                          onPressed: _locateUserPosition,
+                    // Pickup Field
+                    InkWell(
+                      onTap: () => _openLocationSearchModal('pickup'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: VayaTheme.signalCream,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.location_on, color: VayaTheme.saffron, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _isLocating
+                                    ? 'Locating current position...'
+                                    : (_pickupController.text.isEmpty ? 'From: Select Pickup Point' : _pickupController.text),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: _pickupController.text.isEmpty ? VayaTheme.slate : VayaTheme.inkBlack,
+                                ),
+                              ),
+                            ),
+                            if (_isLocating)
+                              const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: VayaTheme.saffron)),
+                          ],
                         ),
                       ),
-                      onChanged: (val) => _onSearchChanged(val, 'pickup'),
                     ),
                     const SizedBox(height: 8),
-                    TextField(
-                      controller: _dropoffController,
-                      style: const TextStyle(fontSize: 14, color: VayaTheme.inkBlack),
-                      decoration: const InputDecoration(
-                        prefixIcon: const Icon(Icons.flag, color: Colors.red),
-                        hintText: 'Search Dropoff Location (To)',
-                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                    // Destination Field
+                    InkWell(
+                      onTap: () => _openLocationSearchModal('destination'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: VayaTheme.signalCream,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.flag, color: Colors.red, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _dropoffController.text.isEmpty ? 'To: Where to deliver?' : _dropoffController.text,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: _dropoffController.text.isEmpty ? VayaTheme.slate : VayaTheme.inkBlack,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      onChanged: (val) => _onSearchChanged(val, 'dropoff'),
                     ),
                   ],
                 ),
               ),
             ),
           ),
-          // Search Results Dropdown List
-          if (_searchResults.isNotEmpty)
-            Positioned(
-              top: 150,
-              left: 16,
-              right: 16,
-              child: Card(
-                color: Colors.white,
-                elevation: 6,
-                child: Container(
-                  constraints: const BoxConstraints(maxHeight: 250),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _searchResults.length,
-                    itemBuilder: (ctx, index) {
-                      final res = _searchResults[index];
-                      return ListTile(
-                        leading: const Icon(Icons.location_city, color: VayaTheme.slate),
-                        title: Text(
-                          res['display_name'] ?? '',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, color: VayaTheme.inkBlack),
-                        ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Full-Screen Location Search & Autocomplete Modal
+class FullScreenLocationSearch extends StatefulWidget {
+  final String initialType;
+  final LatLng currentLocation;
+  const FullScreenLocationSearch({super.key, required this.initialType, required this.currentLocation});
+
+  @override
+  State<FullScreenLocationSearch> createState() => _FullScreenLocationSearchState();
+}
+
+class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
+  final TextEditingController _queryController = TextEditingController();
+  List<Map<String, dynamic>> _predictions = [];
+  bool _searching = false;
+  Timer? _debounce;
+
+  final List<Map<String, String>> _recentSearches = [
+    {'title': 'Master Canteen Railway Station', 'subtitle': 'Railway Station Rd, Master Canteen Area, Bhubaneswar'},
+    {'title': 'Patia Infocity Square', 'subtitle': 'Infocity, Patia, Bhubaneswar'},
+    {'title': 'Janpath Market Complex', 'subtitle': 'Ashok Nagar, Janpath, Bhubaneswar'},
+  ];
+
+  final List<Map<String, String>> _savedPlaces = [
+    {'title': 'Home', 'subtitle': 'Plot 102, Saheed Nagar, Bhubaneswar', 'icon': 'home'},
+    {'title': 'Office / Warehouse', 'subtitle': 'Block B, Chandaka Industrial Estate', 'icon': 'work'},
+  ];
+
+  void _onQueryChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    if (query.trim().length < 2) {
+      setState(() {
+        _predictions.clear();
+        _searching = false;
+      });
+      return;
+    }
+    setState(() => _searching = true);
+    _debounce = Timer(const Duration(milliseconds: 400), () async {
+      final viewbox = '85.70,20.40,85.95,20.20';
+      final url = 'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&viewbox=$viewbox&bounded=1&limit=6';
+      try {
+        final res = await http.get(
+          Uri.parse(url),
+          headers: {'Accept-Language': 'en', 'User-Agent': 'VAYACustomerApp/1.0'},
+        );
+        if (res.statusCode == 200) {
+          final List<dynamic> data = json.decode(res.body);
+          if (mounted) {
+            setState(() {
+              _predictions = data.map((d) => {
+                'display_name': d['display_name'] as String,
+                'lat': double.parse(d['lat'] as String),
+                'lon': double.parse(d['lon'] as String),
+              }).toList();
+              _searching = false;
+            });
+          }
+        }
+      } catch (e) {
+        if (mounted) setState(() => _searching = false);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.initialType == 'pickup' ? 'Select Pickup Location' : 'Select Destination'),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: TextField(
+              controller: _queryController,
+              autofocus: true,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search, color: VayaTheme.saffron),
+                hintText: 'Search landmark, street, area or business...',
+                suffixIcon: _queryController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _queryController.clear();
+                          setState(() => _predictions.clear());
+                        },
+                      )
+                    : null,
+              ),
+              onChanged: _onQueryChanged,
+            ),
+          ),
+
+          // Map Picker Quick Tile
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: VayaTheme.saffron,
+              child: Icon(Icons.map, color: Colors.white, size: 20),
+            ),
+            title: const Text('Choose precise location on Map', style: TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Drag pin to set exact pickup/dropoff gate'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final result = await Navigator.push<Map<String, dynamic>>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MapPinPickerScreen(initialCoords: widget.currentLocation),
+                ),
+              );
+              if (result != null && context.mounted) {
+                Navigator.pop(context, result);
+              }
+            },
+          ),
+          const Divider(height: 1),
+
+          if (_searching)
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: CircularProgressIndicator(color: VayaTheme.saffron),
+            )
+          else if (_predictions.isNotEmpty)
+            Expanded(
+              child: ListView.builder(
+                itemCount: _predictions.length,
+                itemBuilder: (ctx, i) {
+                  final p = _predictions[i];
+                  return ListTile(
+                    leading: const Icon(Icons.location_on_outlined, color: VayaTheme.saffron),
+                    title: Text(p['display_name'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    onTap: () {
+                      Navigator.pop(context, {
+                        'address': p['display_name'],
+                        'coords': LatLng(p['lat'], p['lon']),
+                      });
+                    },
+                  );
+                },
+              ),
+            )
+          else
+            Expanded(
+              child: ListView(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text('SAVED LOCATIONS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                  ),
+                  ..._savedPlaces.map((sp) => ListTile(
+                        leading: Icon(sp['icon'] == 'home' ? Icons.home : Icons.work, color: VayaTheme.saffron),
+                        title: Text(sp['title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text(sp['subtitle']!, style: const TextStyle(fontSize: 11)),
                         onTap: () {
-                          setState(() {
-                            final coords = LatLng(res['lat'], res['lon']);
-                            if (_searchFieldType == 'pickup') {
-                              _pickup = coords;
-                              _pickupController.text = res['display_name'];
-                            } else {
-                              _dropoff = coords;
-                              _dropoffController.text = res['display_name'];
-                            }
-                            _updateMarkers();
-                            _mapController?.animateCamera(CameraUpdate.newLatLngZoom(coords, 14));
-                            _searchResults.clear();
+                          Navigator.pop(context, {
+                            'address': sp['subtitle']!,
+                            'coords': widget.currentLocation,
                           });
                         },
-                      );
-                    },
+                      )),
+                  const Divider(height: 16),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: Text('RECENT SEARCHES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
                   ),
-                ),
+                  ..._recentSearches.map((rs) => ListTile(
+                        leading: const Icon(Icons.history, color: VayaTheme.slate),
+                        title: Text(rs['title']!, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text(rs['subtitle']!, style: const TextStyle(fontSize: 11)),
+                        onTap: () {
+                          Navigator.pop(context, {
+                            'address': rs['subtitle']!,
+                            'coords': widget.currentLocation,
+                          });
+                        },
+                      )),
+                ],
               ),
             ),
         ],
@@ -961,11 +1321,128 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// 4b. Vehicle Selection Screen
+/// Drag Pin Map Location Selector
+class MapPinPickerScreen extends StatefulWidget {
+  final LatLng initialCoords;
+  const MapPinPickerScreen({super.key, required this.initialCoords});
+
+  @override
+  State<MapPinPickerScreen> createState() => _MapPinPickerScreenState();
+}
+
+class _MapPinPickerScreenState extends State<MapPinPickerScreen> {
+  late LatLng _center;
+  String _address = 'Resolving location...';
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _center = widget.initialCoords;
+    _resolveAddress(_center);
+  }
+
+  Future<void> _resolveAddress(LatLng pos) async {
+    setState(() => _loading = true);
+    final url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.latitude}&lon=${pos.longitude}';
+    try {
+      final res = await http.get(
+        Uri.parse(url),
+        headers: {'Accept-Language': 'en', 'User-Agent': 'VAYACustomerApp/1.0'},
+      );
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted) {
+          setState(() {
+            _address = data['display_name'] ?? '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+            _loading = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _address = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Confirm Map Location')),
+      body: Stack(
+        children: [
+          GoogleMap(
+            initialCameraPosition: CameraPosition(target: _center, zoom: 16),
+            onCameraMove: (pos) => _center = pos.target,
+            onCameraIdle: () => _resolveAddress(_center),
+          ),
+          const Center(
+            child: Icon(Icons.location_on, size: 48, color: VayaTheme.saffron),
+          ),
+          Positioned(
+            bottom: 24,
+            left: 16,
+            right: 16,
+            child: Card(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.place, color: VayaTheme.saffron),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _loading ? 'Fetching address...' : _address,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            maxLines: 2,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      onPressed: () {
+                        Navigator.pop(context, {
+                          'address': _address,
+                          'coords': _center,
+                        });
+                      },
+                      child: const Text('Confirm This Location'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 6. Vehicle Comparison & Trip Customization Screen
 class VehicleSelectionScreen extends StatefulWidget {
   final LatLng pickup;
+  final String pickupAddress;
   final LatLng dropoff;
-  const VehicleSelectionScreen({super.key, required this.pickup, required this.dropoff});
+  final String dropoffAddress;
+
+  const VehicleSelectionScreen({
+    super.key,
+    required this.pickup,
+    required this.pickupAddress,
+    required this.dropoff,
+    required this.dropoffAddress,
+  });
 
   @override
   State<VehicleSelectionScreen> createState() => _VehicleSelectionScreenState();
@@ -973,7 +1450,13 @@ class VehicleSelectionScreen extends StatefulWidget {
 
 class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   String _selectedVehicle = 'bike';
+  String _goodsCategory = 'General Cargo';
+  int _helperCount = 0; // 0: No helper, 1: 1 Helper (+150), 2: 2 Helpers (+300)
+  String _couponCode = '';
+  double _discount = 0.0;
+  String _paymentMethod = 'Cash on Delivery';
   bool _isLoading = false;
+
   List<dynamic> _serverPricing = [];
   bool _loadingPricing = true;
 
@@ -998,7 +1481,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
         setState(() => _loadingPricing = false);
       }
     } catch (e) {
-      debugPrint("Failed to load live pricing: $e");
+      debugPrint("Failed to load pricing: $e");
       setState(() => _loadingPricing = false);
     }
   }
@@ -1009,8 +1492,9 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
       widget.pickup.longitude,
       widget.dropoff.latitude,
       widget.dropoff.longitude,
-    ) / 1000.0; // Distance in km
+    ) / 1000.0;
 
+    double baseCost = 50.0;
     if (_serverPricing.isNotEmpty) {
       try {
         final match = _serverPricing.firstWhere(
@@ -1021,30 +1505,31 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           final double basePrice = double.parse(match['base_price'].toString());
           final double baseDistance = double.parse(match['base_distance'].toString());
           final double perKmPrice = double.parse(match['per_km_price'].toString());
-
-          return basePrice + (dist > baseDistance ? (dist - baseDistance) * perKmPrice : 0.0);
+          baseCost = basePrice + (dist > baseDistance ? (dist - baseDistance) * perKmPrice : 0.0);
         }
       } catch (e) {
-        debugPrint("Error parsing match: $e");
+        debugPrint("Error parsing pricing: $e");
+      }
+    } else {
+      switch (vehicleId) {
+        case 'bike':
+          baseCost = 40.0 + (dist > 2 ? (dist - 2) * 10.0 : 0.0);
+          break;
+        case 'three_wheeler':
+          baseCost = 120.0 + (dist > 3 ? (dist - 3) * 18.0 : 0.0);
+          break;
+        case 'ace':
+          baseCost = 250.0 + (dist > 5 ? (dist - 5) * 25.0 : 0.0);
+          break;
+        case 'truck':
+          baseCost = 500.0 + (dist > 5 ? (dist - 5) * 35.0 : 0.0);
+          break;
       }
     }
 
-    switch (vehicleId) {
-      case 'bike':
-        // Base ₹40 (first 2 km) + ₹10/km
-        return 40.0 + (dist > 2 ? (dist - 2) * 10.0 : 0.0);
-      case 'three_wheeler':
-        // Base ₹120 (first 3 km) + ₹18/km
-        return 120.0 + (dist > 3 ? (dist - 3) * 18.0 : 0.0);
-      case 'ace':
-        // Base ₹250 (first 5 km) + ₹25/km
-        return 250.0 + (dist > 5 ? (dist - 5) * 25.0 : 0.0);
-      case 'truck':
-        // Base ₹500 (first 5 km) + ₹35/km
-        return 500.0 + (dist > 5 ? (dist - 5) * 35.0 : 0.0);
-      default:
-        return 50.0;
-    }
+    final helperFee = _helperCount * 150.0;
+    final total = baseCost + helperFee - _discount;
+    return total > 0 ? total : 0.0;
   }
 
   Future<void> _handleBooking() async {
@@ -1063,15 +1548,18 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           'Authorization': 'Bearer $token'
         },
         body: json.encode({
-          'pickupName': 'Selected Pickup Coordinates',
+          'pickupName': widget.pickupAddress,
           'pickupLat': widget.pickup.latitude,
           'pickupLng': widget.pickup.longitude,
-          'dropoffName': 'Selected Dropoff Coordinates',
+          'dropoffName': widget.dropoffAddress,
           'dropoffLat': widget.dropoff.latitude,
           'dropoffLng': widget.dropoff.longitude,
           'vehicleType': _selectedVehicle,
-          'weight': 10,
-          'estimatedCost': estimatedCost
+          'weight': _selectedVehicle == 'bike' ? 15 : (_selectedVehicle == 'ace' ? 400 : 1500),
+          'estimatedCost': estimatedCost,
+          'goodsCategory': _goodsCategory,
+          'helpers': _helperCount,
+          'paymentMethod': _paymentMethod,
         }),
       );
 
@@ -1096,7 +1584,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
         SnackBar(content: Text('Connection error: $e')),
       );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -1109,108 +1597,270 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
       widget.dropoff.longitude,
     ) / 1000.0;
 
+    final double estFare = _calculatePrice(_selectedVehicle);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Choose Vehicle'),
+        title: const Text('Compare Vehicles & Customization'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on, color: VayaTheme.saffron),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Pickup: (${widget.pickup.latitude.toStringAsFixed(4)}, ${widget.pickup.longitude.toStringAsFixed(4)})',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Route Overview Card
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, color: VayaTheme.saffron, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Pickup: ${widget.pickupAddress}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Icon(Icons.flag, color: Colors.red),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Dropoff: (${widget.dropoff.latitude.toStringAsFixed(4)}, ${widget.dropoff.longitude.toStringAsFixed(4)})',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.flag, color: Colors.red, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Dropoff: ${widget.dropoffAddress}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 24),
-                    Text(
-                      'Distance: ${dist.toStringAsFixed(2)} km',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.liveBlue),
-                    ),
-                  ],
+                        ],
+                      ),
+                      const Divider(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Est. Distance: ${dist.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.bold, color: VayaTheme.liveBlue)),
+                          const Text('Est. Transit: ~25 mins', style: TextStyle(fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'SELECT VEHICLE CLASS',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: _loadingPricing 
-                  ? const Center(child: CircularProgressIndicator(color: VayaTheme.saffron))
-                  : ListView(
-                      children: [
-                        _buildVehicleOption(
-                          id: 'bike',
-                          name: 'Bike',
-                          desc: 'Quick deliveries up to 20 kg',
-                          price: '₹${_calculatePrice('bike').toStringAsFixed(2)}',
-                          icon: Icons.motorcycle,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildVehicleOption(
-                          id: 'three_wheeler',
-                          name: 'Cargo 3-wheeler',
-                          desc: 'Medium cargo up to 150 kg',
-                          price: '₹${_calculatePrice('three_wheeler').toStringAsFixed(2)}',
-                          icon: Icons.moped,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildVehicleOption(
-                          id: 'ace',
-                          name: 'Mini Truck (4-wheeler)',
-                          desc: 'Heavy cargo up to 600 kg',
-                          price: '₹${_calculatePrice('ace').toStringAsFixed(2)}',
-                          icon: Icons.local_shipping,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildVehicleOption(
-                          id: 'truck',
-                          name: 'Light Commercial Vehicle (4-wheeler)',
-                          desc: 'Very heavy cargo up to 2,000 kg',
-                          price: '₹${_calculatePrice('truck').toStringAsFixed(2)}',
-                          icon: Icons.fire_truck,
+              const SizedBox(height: 20),
+
+              const Text(
+                'ELIGIBLE VEHICLES',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
+              ),
+              const SizedBox(height: 12),
+
+              if (_loadingPricing)
+                const Center(child: CircularProgressIndicator(color: VayaTheme.saffron))
+              else ...[
+                _buildVehicleOption(
+                  id: 'bike',
+                  name: 'Bike',
+                  capacity: 'Up to 20 kg',
+                  dimensions: '35 x 35 x 40 cm',
+                  eta: '3 mins away',
+                  icon: Icons.motorcycle,
+                ),
+                const SizedBox(height: 10),
+                _buildVehicleOption(
+                  id: 'three_wheeler',
+                  name: 'Cargo 3-Wheeler',
+                  capacity: 'Up to 150 kg',
+                  dimensions: '1.2m x 1m x 1m',
+                  eta: '5 mins away',
+                  icon: Icons.moped,
+                ),
+                const SizedBox(height: 10),
+                _buildVehicleOption(
+                  id: 'ace',
+                  name: 'Mini Truck (4-Wheeler)',
+                  capacity: 'Up to 600 kg',
+                  dimensions: '2.1m x 1.4m x 1.2m',
+                  eta: '8 mins away',
+                  icon: Icons.local_shipping,
+                ),
+                const SizedBox(height: 10),
+                _buildVehicleOption(
+                  id: 'truck',
+                  name: 'Light Commercial Vehicle (LCV)',
+                  capacity: 'Up to 2,000 kg',
+                  dimensions: '3.0m x 1.8m x 1.8m',
+                  eta: '12 mins away',
+                  icon: Icons.fire_truck,
+                ),
+              ],
+
+              const SizedBox(height: 24),
+              const Text(
+                'TRIP CUSTOMIZATION',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
+              ),
+              const SizedBox(height: 12),
+
+              // Goods Category Dropdown
+              DropdownButtonFormField<String>(
+                value: _goodsCategory,
+                decoration: const InputDecoration(labelText: 'Goods Category'),
+                items: const [
+                  DropdownMenuItem(value: 'General Cargo', child: Text('General Packages & Boxes')),
+                  DropdownMenuItem(value: 'Electronics', child: Text('Electronics & Appliances')),
+                  DropdownMenuItem(value: 'Furniture', child: Text('Furniture & Home Goods')),
+                  DropdownMenuItem(value: 'FMCG', child: Text('Groceries / FMCG Products')),
+                  DropdownMenuItem(value: 'Hardware', child: Text('Hardware / Construction Goods')),
+                  DropdownMenuItem(value: 'Fragile', child: Text('Fragile / Glassware')),
+                ],
+                onChanged: (val) => setState(() => _goodsCategory = val!),
+              ),
+              const SizedBox(height: 12),
+
+              // Labour / Helper Selection
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Helper / Loading Assistance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          ChoiceChip(
+                            label: const Text('No Helper'),
+                            selected: _helperCount == 0,
+                            onSelected: (_) => setState(() => _helperCount = 0),
+                            selectedColor: VayaTheme.saffron,
+                            labelStyle: TextStyle(color: _helperCount == 0 ? Colors.white : VayaTheme.inkBlack),
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('1 Helper (+₹150)'),
+                            selected: _helperCount == 1,
+                            onSelected: (_) => setState(() => _helperCount = 1),
+                            selectedColor: VayaTheme.saffron,
+                            labelStyle: TextStyle(color: _helperCount == 1 ? Colors.white : VayaTheme.inkBlack),
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('2 Helpers (+₹300)'),
+                            selected: _helperCount == 2,
+                            onSelected: (_) => setState(() => _helperCount = 2),
+                            selectedColor: VayaTheme.saffron,
+                            labelStyle: TextStyle(color: _helperCount == 2 ? Colors.white : VayaTheme.inkBlack),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Payment Method Choice
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Payment Method', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          ChoiceChip(
+                            avatar: const Icon(Icons.money, size: 18),
+                            label: const Text('Cash on Delivery'),
+                            selected: _paymentMethod == 'Cash on Delivery',
+                            onSelected: (_) => setState(() => _paymentMethod = 'Cash on Delivery'),
+                            selectedColor: VayaTheme.saffron,
+                            labelStyle: TextStyle(color: _paymentMethod == 'Cash on Delivery' ? Colors.white : VayaTheme.inkBlack),
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            avatar: const Icon(Icons.qr_code, size: 18),
+                            label: const Text('UPI / Wallet'),
+                            selected: _paymentMethod == 'UPI / Wallet',
+                            onSelected: (_) => setState(() => _paymentMethod = 'UPI / Wallet'),
+                            selectedColor: VayaTheme.saffron,
+                            labelStyle: TextStyle(color: _paymentMethod == 'UPI / Wallet' ? Colors.white : VayaTheme.inkBlack),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Itemized Fare Review Card
+              Card(
+                color: VayaTheme.signalCream,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('ESTIMATED FARE BREAKDOWN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaTheme.slate)),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Base Transport Fare', style: TextStyle(fontSize: 13)),
+                          Text('₹${(_calculatePrice(_selectedVehicle) - (_helperCount * 150.0)).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        ],
+                      ),
+                      if (_helperCount > 0) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Loading Assistance ($_helperCount Helper)', style: const TextStyle(fontSize: 13)),
+                            Text('₹${(_helperCount * 150.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          ],
                         ),
                       ],
-                    ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _handleBooking,
-              child: _isLoading 
-                  ? const Center(child: CircularProgressIndicator(color: Colors.white))
-                  : const Text('Book a VAYA'),
-            ),
-          ],
+                      const Divider(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Estimated Fare Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack)),
+                          Text('₹${estFare.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: VayaTheme.saffron)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '* Fare shown is an estimate. Final charge may vary depending on actual tolls, parking, or waiting time exceeding included limits.',
+                        style: TextStyle(fontSize: 10, color: VayaTheme.slate, fontStyle: FontStyle.italic),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              ElevatedButton(
+                onPressed: _isLoading ? null : _handleBooking,
+                child: _isLoading 
+                    ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                    : const Text('Confirm Vehicle & Book Now'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1219,59 +1869,65 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   Widget _buildVehicleOption({
     required String id,
     required String name,
-    required String desc,
-    required String price,
+    required String capacity,
+    required String dimensions,
+    required String eta,
     required IconData icon,
   }) {
     final isSelected = _selectedVehicle == id;
+    final fare = _calculatePrice(id);
+
     return InkWell(
       onTap: () => setState(() => _selectedVehicle = id),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           border: Border.all(
             color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
             width: isSelected ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(16),
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? Colors.white : Colors.white70,
         ),
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isSelected ? VayaTheme.saffron.withOpacity(0.1) : VayaTheme.fog.withOpacity(0.3),
+                color: isSelected ? VayaTheme.saffron.withOpacity(0.15) : VayaTheme.fog.withOpacity(0.4),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 32, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
+              child: Icon(icon, size: 30, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: isSelected ? VayaTheme.inkBlack : VayaTheme.slate,
-                    ),
+                  Row(
+                    children: [
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: VayaTheme.liveBlue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(eta, style: const TextStyle(fontSize: 10, color: VayaTheme.liveBlue, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    desc,
-                    style: const TextStyle(fontSize: 11, color: VayaTheme.slate),
-                  ),
+                  Text('$capacity • Box: $dimensions', style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
                 ],
               ),
             ),
             Text(
-              price,
+              '₹${fare.toStringAsFixed(0)}',
               style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
                 color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
               ),
             ),
@@ -1282,7 +1938,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   }
 }
 
-/// 5. Live Tracking Screen (Updates automatically via WebSocket channels)
+/// 7. Full-Screen Order Status & Live Tracking Experience
 class TrackingScreen extends StatefulWidget {
   final String bookingId;
   const TrackingScreen({super.key, required this.bookingId});
@@ -1294,11 +1950,17 @@ class TrackingScreen extends StatefulWidget {
 class _TrackingScreenState extends State<TrackingScreen> {
   IOWebSocketChannel? _channel;
   GoogleMapController? _mapController;
-  
-  String _status = "Searching for drivers...";
-  String _driverName = "Waiting to assign...";
+
+  String _status = "searching"; // searching, driver_assigned, arrived_pickup, loading, in_transit, arrived_drop, completed
+  String _driverName = "Searching nearby drivers...";
   String _driverPlate = "-";
+  String _driverPhone = "";
   String _otp = "";
+  double _estimatedCost = 0.0;
+  String _vehicleType = "bike";
+
+  LatLng _pickupPos = const LatLng(20.2961, 85.8245);
+  LatLng _dropPos = const LatLng(20.3150, 85.8178);
   LatLng? _driverPos;
   final Set<Marker> _markers = {};
 
@@ -1326,16 +1988,25 @@ class _TrackingScreenState extends State<TrackingScreen> {
           final booking = data['booking'];
           setState(() {
             _status = booking['status'];
-            _otp = booking['otp'];
-            if (booking['driver_id'] != null) {
-              _driverName = booking['driver_name'] ?? "Assigned Delivery Partner";
-              _driverPlate = booking['driver_plate'] ?? "";
+            _otp = booking['otp'] ?? '849201';
+            _estimatedCost = double.tryParse(booking['estimated_cost'].toString()) ?? 0.0;
+            _vehicleType = booking['vehicle_type'] ?? 'bike';
+            if (booking['pickup_lat'] != null) {
+              _pickupPos = LatLng(double.parse(booking['pickup_lat'].toString()), double.parse(booking['pickup_lng'].toString()));
             }
+            if (booking['dropoff_lat'] != null) {
+              _dropPos = LatLng(double.parse(booking['dropoff_lat'].toString()), double.parse(booking['dropoff_lng'].toString()));
+            }
+            if (booking['driver_id'] != null) {
+              _driverName = booking['driver_name'] ?? "Driver Partner";
+              _driverPlate = booking['driver_plate'] ?? "OD-02-X-999";
+            }
+            _updateMapMarkers();
           });
         }
       }
     } catch (e) {
-      debugPrint("Failed to fetch initial booking info: $e");
+      debugPrint("Failed to fetch booking info: $e");
     }
   }
 
@@ -1351,48 +2022,54 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
       _channel!.stream.listen((message) {
         final data = json.decode(message);
-        
+
         if (data['type'] == 'booking_accepted' && data['bookingId'] == widget.bookingId) {
           final b = data['booking'];
           setState(() {
-            _status = 'accepted';
-            _driverName = b['driver_name'] ?? 'Assigned Partner';
+            _status = 'driver_assigned';
+            _driverName = b['driver_name'] ?? 'Driver Partner';
             _driverPlate = b['driver_plate'] ?? '';
           });
         } else if (data['type'] == 'booking_transit' && data['bookingId'] == widget.bookingId) {
-          setState(() => _status = 'dropping_off');
+          setState(() => _status = 'in_transit');
         } else if (data['type'] == 'booking_status' && data['bookingId'] == widget.bookingId) {
           setState(() => _status = data['status']);
-          if (data['status'] == 'completed') {
-            _closeAndExit('Delivery completed successfully!');
-          } else if (data['status'] == 'cancelled') {
-            _closeAndExit('Delivery was cancelled.');
-          }
-        } else if (data['type'] == 'driver_position' && _status != 'completed') {
+        } else if (data['type'] == 'driver_position') {
           final lat = data['lat'];
           final lng = data['lng'];
           setState(() {
             _driverPos = LatLng(lat, lng);
-            _markers.clear();
-            _markers.add(Marker(
-              markerId: const MarkerId('driver'),
-              position: _driverPos!,
-              infoWindow: const InfoWindow(title: 'Live Driver Position'),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-            ));
+            _updateMapMarkers();
           });
-          _mapController?.animateCamera(CameraUpdate.newLatLng(_driverPos!));
         }
       });
     } catch (e) {
-      debugPrint("WebSocket stream failed: $e");
+      debugPrint("WebSocket failed: $e");
     }
   }
 
-  void _closeAndExit(String message) {
-    _channel?.sink.close();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-    Navigator.popUntil(context, (route) => route.isFirst);
+  void _updateMapMarkers() {
+    _markers.clear();
+    _markers.add(Marker(
+      markerId: const MarkerId('pickup'),
+      position: _pickupPos,
+      infoWindow: const InfoWindow(title: 'Pickup Location'),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+    ));
+    _markers.add(Marker(
+      markerId: const MarkerId('dropoff'),
+      position: _dropPos,
+      infoWindow: const InfoWindow(title: 'Dropoff Location'),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+    ));
+    if (_driverPos != null) {
+      _markers.add(Marker(
+        markerId: const MarkerId('driver'),
+        position: _driverPos!,
+        infoWindow: const InfoWindow(title: 'Driver Live Location'),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      ));
+    }
   }
 
   @override
@@ -1403,68 +2080,364 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final str = LocalizedStrings.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(str.tracking)),
-      body: Column(
-        children: [
-          Expanded(
-            flex: 3,
-            child: GoogleMap(
-              initialCameraPosition: const CameraPosition(
-                target: LatLng(20.2961, 85.8245),
-                zoom: 13,
-              ),
-              markers: _markers,
-              onMapCreated: (c) => _mapController = c,
-            ),
+      appBar: AppBar(
+        title: Text('Booking #${widget.bookingId.substring(0, 8).toUpperCase()}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.help_outline),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Contacting VAYA 24x7 Customer Support...')),
+              );
+            },
           ),
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: const BoxDecoration(
-              color: VayaTheme.signalCream,
-              border: Border(top: BorderSide(color: VayaTheme.fog, width: 1)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'STATUS: ${_status.toUpperCase()}',
-                  style: const TextStyle(
-                    fontSize: 16, 
-                    fontWeight: FontWeight.w800, 
-                    color: VayaTheme.liveBlue,
-                    letterSpacing: 1.2
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: VayaTheme.fog,
-                      child: Icon(Icons.person, color: VayaTheme.inkBlack)
-                    ),
-                    title: Text(_driverName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('PLATE: $_driverPlate', style: const TextStyle(fontSize: 11, letterSpacing: 0.5)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.call, color: VayaTheme.routeGreen),
-                      onPressed: () {},
-                    ),
-                  ),
-                ),
-                const Divider(height: 32),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        ],
+      ),
+      body: Stack(
+        children: [
+          // Live Map View
+          GoogleMap(
+            initialCameraPosition: CameraPosition(target: _pickupPos, zoom: 13),
+            markers: _markers,
+            onMapCreated: (c) => _mapController = c,
+          ),
+
+          // Layered Fulfilment Status Card
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: Card(
+              color: Colors.white,
+              elevation: 6,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text('VERIFICATION OTP', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 12, color: VayaTheme.slate)),
-                    Text(_otp, style: const TextStyle(fontSize: 22, color: VayaTheme.routeGreen, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+                    // Status Badge Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: VayaTheme.saffron.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _status.toUpperCase().replaceAll('_', ' '),
+                            style: const TextStyle(
+                              color: VayaTheme.saffron,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          'Est. Fare: ₹${_estimatedCost.toStringAsFixed(0)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Driver Card Section
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const CircleAvatar(
+                        backgroundColor: VayaTheme.fog,
+                        child: Icon(Icons.person, color: VayaTheme.inkBlack),
+                      ),
+                      title: Text(_driverName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      subtitle: Text('Plate: $_driverPlate • Class: ${_vehicleType.toUpperCase()}', style: const TextStyle(fontSize: 11)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.call, color: VayaTheme.routeGreen),
+                            onPressed: () {},
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.chat_bubble_outline, color: VayaTheme.liveBlue),
+                            onPressed: () {},
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const Divider(height: 16),
+
+                    // Security Pickup OTP Box
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('PICKUP VERIFICATION OTP', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                            Text('Share with driver upon arrival', style: TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: VayaTheme.routeGreen.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: VayaTheme.routeGreen, width: 1.5),
+                          ),
+                          child: Text(
+                            _otp.isEmpty ? '849201' : _otp,
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: VayaTheme.routeGreen, letterSpacing: 2),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Contextual Action Buttons
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Live tracking link copied to clipboard!')),
+                        );
+                      },
+                      icon: const Icon(Icons.share, size: 18),
+                      label: const Text('Share Live Tracking Link'),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                const Text('Provide this secure OTP code to the driver upon cargo pickup.', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
-              ],
+              ),
             ),
-          )
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 8. Orders History Screen (Orders Tab)
+class OrdersScreen extends StatelessWidget {
+  final VoidCallback onTrackActive;
+  const OrdersScreen({super.key, required this.onTrackActive});
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('My Deliveries'),
+          bottom: const TabBar(
+            labelColor: VayaTheme.saffron,
+            indicatorColor: VayaTheme.saffron,
+            tabs: [
+              Tab(text: 'Active'),
+              Tab(text: 'Completed'),
+              Tab(text: 'Cancelled'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // Active Tab
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ListView(
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('#VY-849201', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: VayaTheme.liveBlue.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text('IN TRANSIT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaTheme.liveBlue)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const Text('From: Master Canteen Square, Bhubaneswar', style: TextStyle(fontSize: 12, color: VayaTheme.inkBlack)),
+                          const Text('To: Infocity Road, Patia, Bhubaneswar', style: TextStyle(fontSize: 12, color: VayaTheme.inkBlack)),
+                          const Divider(height: 20),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Est. Fare: ₹280', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.saffron)),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+                                onPressed: onTrackActive,
+                                child: const Text('Track Order', style: TextStyle(fontSize: 12)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Completed Tab
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ListView(
+                children: const [
+                  Card(
+                    child: ListTile(
+                      leading: CircleAvatar(backgroundColor: VayaTheme.signalCream, child: Icon(Icons.check_circle, color: VayaTheme.routeGreen)),
+                      title: Text('Delivery #VY-729104', style: TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('Patia -> Saheed Nagar • ₹180'),
+                      trailing: Text('Delivered', style: TextStyle(color: VayaTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Cancelled Tab
+            const Center(
+              child: Text('No cancelled orders.', style: TextStyle(color: VayaTheme.slate)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 9. Payments Screen (Payments Tab)
+class PaymentsScreen extends StatelessWidget {
+  const PaymentsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Payments & Wallet')),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              color: VayaTheme.inkBlack,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('VAYA WALLET BALANCE', style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 1.0)),
+                    const SizedBox(height: 8),
+                    const Text('₹500.00', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: VayaTheme.saffron),
+                      onPressed: () {},
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Wallet Credits'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text('SAVED PAYMENT METHODS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaTheme.slate)),
+            const SizedBox(height: 12),
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.money, color: VayaTheme.routeGreen),
+                title: Text('Cash on Delivery', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('Pay cash to driver upon cargo arrival'),
+                trailing: Icon(Icons.check_circle, color: VayaTheme.saffron),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.qr_code, color: VayaTheme.liveBlue),
+                title: Text('UPI / Google Pay / PhonePe', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('Instant UPI payment on booking'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 10. Account & Settings Screen (Account Tab)
+class AccountScreen extends StatelessWidget {
+  const AccountScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    return Scaffold(
+      appBar: AppBar(title: const Text('My Account')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Card(
+            child: ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: VayaTheme.saffron,
+                child: Icon(Icons.person, color: Colors.white),
+              ),
+              title: Text(user?.displayName ?? 'VAYA Customer', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(user?.phoneNumber ?? '+91 9876543210'),
+              trailing: const Icon(Icons.edit, color: VayaTheme.slate),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const ListTile(
+            leading: Icon(Icons.place, color: VayaTheme.saffron),
+            title: Text('Saved Addresses'),
+            subtitle: Text('Home, Warehouse, Office'),
+            trailing: Icon(Icons.chevron_right),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.business, color: VayaTheme.liveBlue),
+            title: Text('Business Profile & GST Billing'),
+            subtitle: Text('Add GSTIN for tax invoices'),
+            trailing: Icon(Icons.chevron_right),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.help_outline, color: VayaTheme.routeGreen),
+            title: Text('Help & 24x7 Customer Support'),
+            subtitle: Text('FAQs, Safety & Dispute Assistance'),
+            trailing: Icon(Icons.chevron_right),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            onTap: () async {
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              }
+            },
+          ),
         ],
       ),
     );
