@@ -7,6 +7,24 @@ import { broadcast } from '../services/websocket.service.js';
 
 const router = express.Router();
 
+// GET /api/driver/today-earnings - Fetch sum of earnings for completed bookings today
+router.get('/today-earnings', verifyToken, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const result = await query(
+      `SELECT COALESCE(SUM(estimated_cost), 0) AS today_earnings 
+       FROM bookings 
+       WHERE driver_id = $1 AND status = 'completed' AND DATE(created_at) = CURRENT_DATE`,
+      [uid]
+    );
+    const earnings = parseFloat(result.rows[0].today_earnings || 0);
+    res.json({ success: true, todayEarnings: earnings });
+  } catch (err) {
+    console.error('GET /api/driver/today-earnings error:', err);
+    res.status(500).json({ error: 'Failed to fetch today earnings' });
+  }
+});
+
 // GET /api/driver/me - Get current driver profile
 router.get('/me', verifyToken, async (req, res) => {
   try {

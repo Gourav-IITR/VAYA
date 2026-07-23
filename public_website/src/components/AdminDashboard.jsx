@@ -12,8 +12,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:5001' : window.location.origin;
-const wsBaseUrl = import.meta.env.DEV ? 'ws://localhost:5001' : (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host;
+const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:5001' : 'https://vaya-backend-275777907648.us-central1.run.app';
+const wsBaseUrl = import.meta.env.DEV ? 'ws://localhost:5001' : 'wss://vaya-backend-275777907648.us-central1.run.app';
 
 export default function AdminDashboard({ adminUser }) {
   const [activeTab, setActiveTab] = useState('orders'); // orders, drivers, audit
@@ -49,22 +49,32 @@ export default function AdminDashboard({ adminUser }) {
       const token = await adminUser.getIdToken();
       const headers = { 'Authorization': `Bearer ${token}` };
 
-      const [metricsRes, bookingsRes, driversRes, auditRes] = await Promise.all([
-        fetch(`${apiBaseUrl}/api/admin/dashboard`, { headers }),
-        fetch(`${apiBaseUrl}/api/admin/bookings`, { headers }),
-        fetch(`${apiBaseUrl}/api/admin/drivers`, { headers }),
-        fetch(`${apiBaseUrl}/api/admin/audit-log`, { headers })
+      const fetchJson = async (url, opts) => {
+        try {
+          const res = await fetch(url, opts);
+          if (res.ok) {
+            return await res.json();
+          }
+          console.warn(`API returned non-OK status: ${res.status} for ${url}`);
+        } catch (err) {
+          console.error(`Failed fetching ${url}:`, err);
+        }
+        return null;
+      };
+
+      const [metricsData, bookingsData, driversData, auditData, pricingData] = await Promise.all([
+        fetchJson(`${apiBaseUrl}/api/admin/dashboard`, { headers }),
+        fetchJson(`${apiBaseUrl}/api/admin/bookings`, { headers }),
+        fetchJson(`${apiBaseUrl}/api/admin/drivers`, { headers }),
+        fetchJson(`${apiBaseUrl}/api/admin/audit-log`, { headers }),
+        fetchJson(`${apiBaseUrl}/api/pricing-config`)
       ]);
 
-      const metricsData = await metricsRes.json();
-      const bookingsData = await bookingsRes.json();
-      const driversData = await driversRes.json();
-      const auditData = await auditRes.json();
-
-      setMetrics(metricsData.metrics || {});
-      setBookings(bookingsData.bookings || []);
-      setDrivers(driversData.drivers || []);
-      setAuditLogs(auditData.logs || []);
+      if (metricsData) setMetrics(metricsData.metrics || {});
+      if (bookingsData) setBookings(bookingsData.bookings || []);
+      if (driversData) setDrivers(driversData.drivers || []);
+      if (auditData) setAuditLogs(auditData.logs || []);
+      if (pricingData) setPricingConfig(pricingData.pricing || []);
     } catch (e) {
       console.error('Failed to load dashboard data:', e);
     } finally {

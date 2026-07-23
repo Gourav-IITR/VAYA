@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 // Configuration URL - Change to your Cloud Run URL in production
 const String apiBaseUrl = "https://vaya-backend-275777907648.us-central1.run.app";
 const String wsBaseUrl = "wss://vaya-backend-275777907648.us-central1.run.app";
@@ -29,11 +30,9 @@ class VayaDriverTheme {
     colorScheme: const ColorScheme.dark(
       primary: saffron,
       secondary: slate,
-      background: inkBlack,
       surface: Color(0xFF1A1A17),
       onPrimary: Colors.white,
       onSurface: signalCream,
-      onBackground: signalCream,
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: inkBlack,
@@ -545,7 +544,7 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _vehicleType,
+                  initialValue: _vehicleType,
                   dropdownColor: const Color(0xFF1A1A17),
                   style: const TextStyle(color: VayaDriverTheme.signalCream),
                   decoration: const InputDecoration(labelText: 'Vehicle Class'),
@@ -600,14 +599,90 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   IOWebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
 
-  // Active Job states
+  // Active Job & Notification states
   Map<String, dynamic>? _activeJob;
   Map<String, dynamic>? _incomingAlert;
+  double _todayEarnings = 0.0;
+  final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
+  static const int _onlineNotificationId = 888;
 
   @override
   void initState() {
     super.initState();
+    _initNotifications();
+    _fetchTodayEarnings();
     _checkLocationPermission();
+  }
+
+  Future<void> _initNotifications() async {
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+    await _notificationsPlugin.initialize(initializationSettings);
+
+    final androidPlugin = _notificationsPlugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      await androidPlugin.requestNotificationsPermission();
+    }
+  }
+
+  Future<void> _fetchTodayEarnings() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/driver/today-earnings'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['success'] == true) {
+          setState(() {
+            _todayEarnings = (data['todayEarnings'] as num).toDouble();
+          });
+          if (_isOnline) {
+            _updateOnlineNotification();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching today earnings: $e");
+    }
+  }
+
+  Future<void> _updateOnlineNotification() async {
+    final androidDetails = AndroidNotificationDetails(
+      'vaya_driver_online_status',
+      'VAYA Partner Online Service',
+      channelDescription: 'Persistent notification while driver is online',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true, // STAYS in notification drawer while online
+      autoCancel: false,
+      onlyAlertOnce: true,
+      showWhen: false,
+      color: const Color(0xFFF26430),
+      icon: '@mipmap/ic_launcher',
+    );
+
+    final notificationDetails = NotificationDetails(android: androidDetails);
+    final String earningsText = '₹${_todayEarnings.toStringAsFixed(0)}';
+
+    await _notificationsPlugin.show(
+      _onlineNotificationId,
+      'VAYA Partner is Online 🟢',
+      'Active & ready for orders | Today\'s Earnings: $earningsText',
+      notificationDetails,
+    );
+  }
+
+  Future<void> _cancelOnlineNotification() async {
+    await _notificationsPlugin.cancel(_onlineNotificationId);
   }
 
   Future<void> _checkLocationPermission() async {
@@ -616,20 +691,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      // Show Google Play compliant Prominent Disclosure Dialog before permission request
+      // Show Google Play compliant Prominent Disclosure Dialog before system permission request
       final bool? proceed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (BuildContext context) {
           return AlertDialog(
-            backgroundColor: VayaDriverTheme.slate,
-            title: const Text(
-              'Location Background Usage',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            backgroundColor: const Color(0xFF1A1A17),
+            title: const Row(
+              children: [
+                Icon(Icons.location_on, color: VayaDriverTheme.saffron),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Location Permission Required',
+                    style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                ),
+              ],
             ),
             content: const Text(
-              'VAYA Driver collects location data to find nearby trips and track routes to customers, even when the app is closed or not in use.',
-              style: TextStyle(color: Colors.white70),
+              'VAYA Partner collects location data to enable real-time order tracking and ETA updates for customers even when the app is closed or not in use.',
+              style: TextStyle(color: VayaDriverTheme.signalCream, height: 1.5),
             ),
             actions: [
               TextButton(
@@ -649,16 +732,34 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       if (proceed != true) return;
 
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
     }
 
-    final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    if (permission == LocationPermission.deniedForever) {
+      await Geolocator.openAppSettings();
+      return;
+    }
+
+    final pos = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
     setState(() {
       _currentPosition = LatLng(pos.latitude, pos.longitude);
     });
   }
 
   Future<void> _toggleOnline(bool online) async {
+    if (online) {
+      // Check location permission with prominent disclosure if needed
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+        await _checkLocationPermission();
+        perm = await Geolocator.checkPermission();
+        if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+          return;
+        }
+      }
+    }
+
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
@@ -683,9 +784,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         if (online) {
           _connectWebSocket();
           _startLocationStreaming();
+          _updateOnlineNotification();
         } else {
           _disconnectWebSocket();
           _stopLocationStreaming();
+          _cancelOnlineNotification();
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -834,13 +937,24 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
-        setState(() {
-          if (status == 'completed' || status == 'cancelled') {
+        if (status == 'completed' && _activeJob != null) {
+          final cost = double.tryParse(_activeJob!['estimated_cost'].toString()) ?? 0.0;
+          setState(() {
+            _todayEarnings += cost;
             _activeJob = null;
-          } else {
-            _activeJob = data['booking'];
+          });
+          if (_isOnline) {
+            _updateOnlineNotification();
           }
-        });
+        } else {
+          setState(() {
+            if (status == 'cancelled') {
+              _activeJob = null;
+            } else {
+              _activeJob = data['booking'];
+            }
+          });
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating status: $e')));
@@ -858,6 +972,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   void dispose() {
     _stopLocationStreaming();
     _disconnectWebSocket();
+    _cancelOnlineNotification();
     super.dispose();
   }
 
@@ -869,7 +984,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         actions: [
           Switch(
             value: _isOnline,
-            activeColor: VayaDriverTheme.routeGreen,
+            activeTrackColor: VayaDriverTheme.routeGreen,
             onChanged: _toggleOnline,
           ),
           Padding(
@@ -913,9 +1028,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   ),
                 ],
               ),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(Icons.drive_eta, color: VayaDriverTheme.saffron, size: 36),
+              currentAccountPicture: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: VayaDriverTheme.inkBlack,
+                  border: Border.all(color: Colors.white24, width: 2),
+                ),
+                child: const Icon(Icons.drive_eta, color: VayaDriverTheme.saffron, size: 36),
               ),
             ),
             ListTile(
