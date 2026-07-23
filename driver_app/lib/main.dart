@@ -105,8 +105,86 @@ class VayaDriverApp extends StatelessWidget {
       title: 'VAYA Driver Partner',
       debugShowCheckedModeBanner: false,
       theme: VayaDriverTheme.themeData,
-      home: const DriverLoginScreen(),
+      home: const DriverAuthWrapper(),
     );
+  }
+}
+
+class DriverAuthWrapper extends StatefulWidget {
+  const DriverAuthWrapper({super.key});
+
+  @override
+  State<DriverAuthWrapper> createState() => _DriverAuthWrapperState();
+}
+
+class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
+  bool _checking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthState();
+  }
+
+  Future<void> _checkAuthState() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _checking = false);
+      return;
+    }
+
+    try {
+      final token = await user.getIdToken();
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/driver/me'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted) {
+          if (data['exists'] == true) {
+            final driver = data['driver'];
+            if (driver['is_approved'] == true) {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => DriverHomeScreen(driverData: driver)),
+                (route) => false,
+              );
+            } else {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const PendingApprovalScreen()),
+                (route) => false,
+              );
+            }
+          } else {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const DriverOnboardingScreen()),
+              (route) => false,
+            );
+          }
+        }
+      } else {
+        setState(() => _checking = false);
+      }
+    } catch (e) {
+      debugPrint("Driver auth check error: $e");
+      setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: VayaDriverTheme.saffron),
+        ),
+      );
+    }
+    return const DriverLoginScreen();
   }
 }
 
@@ -473,8 +551,9 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                   decoration: const InputDecoration(labelText: 'Vehicle Class'),
                   items: const [
                     DropdownMenuItem(value: 'bike', child: Text('Two-Wheeler (Bike)')),
-                    DropdownMenuItem(value: 'ace', child: Text('Mini Truck (Tata Ace)')),
-                    DropdownMenuItem(value: 'truck', child: Text('Large Truck (Tata 407)')),
+                    DropdownMenuItem(value: 'three_wheeler', child: Text('Cargo 3-wheeler')),
+                    DropdownMenuItem(value: 'ace', child: Text('Mini Truck (4-wheeler)')),
+                    DropdownMenuItem(value: 'truck', child: Text('Light Commercial Vehicle (4-wheeler)')),
                   ],
                   onChanged: (val) => setState(() => _vehicleType = val!),
                 ),

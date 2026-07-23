@@ -21,4 +21,14 @@ router.get('/health', async (req, res) => {
   }
 });
 
+router.get('/pricing-config', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM pricing_config');
+    res.json({ pricing: result.rows });
+  } catch (err) {
+    console.error('GET /api/pricing-config error:', err);
+    res.status(500).json({ error: 'Failed to fetch pricing configuration' });
+  }
+});
+
 export default router;

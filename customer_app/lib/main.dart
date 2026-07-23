@@ -129,7 +129,81 @@ class _VayaCustomerAppState extends State<VayaCustomerApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: LanguageSelectionScreen(onLanguageSelected: setLocale),
+      home: const AuthWrapper(),
+    );
+  }
+}
+
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  bool _checking = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthState();
+  }
+
+  Future<void> _checkAuthState() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _checking = false);
+      return;
+    }
+
+    try {
+      final token = await user.getIdToken();
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/customer/me'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted) {
+          if (data['exists'] == true) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const HomeScreen()),
+              (route) => false,
+            );
+          } else {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+              (route) => false,
+            );
+          }
+        }
+      } else {
+        setState(() => _checking = false);
+      }
+    } catch (e) {
+      debugPrint("Auth check error: $e");
+      setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: VayaTheme.saffron),
+        ),
+      );
+    }
+    return LanguageSelectionScreen(
+      onLanguageSelected: (locale) {
+        final appState = context.findAncestorStateOfType<_VayaCustomerAppState>();
+        appState?.setLocale(locale);
+      },
     );
   }
 }
@@ -546,11 +620,37 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<Marker> _markers = {};
   GoogleMapController? _mapController;
 
+  final TextEditingController _pickupController = TextEditingController();
+  final TextEditingController _dropoffController = TextEditingController();
+  List<Map<String, dynamic>> _searchResults = [];
+  String _searchFieldType = '';
+  Timer? _debounceTimer;
+
   @override
   void initState() {
     super.initState();
     _updateMarkers();
+    _initDefaultAddresses();
     _locateUserPosition();
+  }
+
+  @override
+  void dispose() {
+    _pickupController.dispose();
+    _dropoffController.dispose();
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initDefaultAddresses() async {
+    final pAddr = await getAddressFromCoords(_pickup.latitude, _pickup.longitude);
+    final dAddr = await getAddressFromCoords(_dropoff.latitude, _dropoff.longitude);
+    if (mounted) {
+      setState(() {
+        _pickupController.text = pAddr;
+        _dropoffController.text = dAddr;
+      });
+    }
   }
 
   Future<void> _locateUserPosition() async {
@@ -561,15 +661,84 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
         Position pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+        final coords = LatLng(pos.latitude, pos.longitude);
         setState(() {
-          _pickup = LatLng(pos.latitude, pos.longitude);
+          _pickup = coords;
           _updateMarkers();
         });
-        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(_pickup, 14));
+        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(coords, 14));
+        
+        final addr = await getAddressFromCoords(pos.latitude, pos.longitude);
+        setState(() {
+          _pickupController.text = addr;
+        });
       }
     } catch (e) {
       debugPrint("Could not retrieve current location: $e");
     }
+  }
+
+  Future<String> getAddressFromCoords(double lat, double lng) async {
+    final url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng';
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Accept-Language': 'en',
+          'User-Agent': 'VAYACustomerApp/1.0 (com.vaya.customer_app)',
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['display_name'] ?? '(${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})';
+      }
+    } catch (e) {
+      debugPrint("Reverse geocoding error: $e");
+    }
+    return '(${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})';
+  }
+
+  Future<List<Map<String, dynamic>>> searchLocations(String query) async {
+    if (query.trim().length < 2) return [];
+    final viewbox = '85.70,20.40,85.95,20.20';
+    final url = 'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&viewbox=$viewbox&bounded=1&limit=6';
+    try {
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Accept-Language': 'en',
+          'User-Agent': 'VAYACustomerApp/1.0 (com.vaya.customer_app)',
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((d) => {
+          'display_name': d['display_name'] as String,
+          'lat': double.parse(d['lat'] as String),
+          'lon': double.parse(d['lon'] as String),
+        }).toList();
+      }
+    } catch (e) {
+      debugPrint("Autocomplete search error: $e");
+    }
+    return [];
+  }
+
+  void _onSearchChanged(String query, String type) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () async {
+      if (query.trim().length < 2) {
+        setState(() {
+          _searchResults.clear();
+        });
+        return;
+      }
+      final results = await searchLocations(query);
+      setState(() {
+        _searchFieldType = type;
+        _searchResults = results;
+      });
+    });
   }
 
   void _updateMarkers() {
@@ -641,72 +810,151 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      body: Column(
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.white,
+        foregroundColor: VayaTheme.saffron,
+        onPressed: _locateUserPosition,
+        child: const Icon(Icons.gps_fixed),
+      ),
+      body: Stack(
         children: [
-          Expanded(
-            child: Stack(
-              children: [
-                GoogleMap(
+          Column(
+            children: [
+              Expanded(
+                child: GoogleMap(
                   initialCameraPosition: const CameraPosition(
                     target: LatLng(20.2961, 85.8245),
                     zoom: 12,
                   ),
                   markers: _markers,
+                  myLocationButtonEnabled: false,
                   onMapCreated: (c) => _mapController = c,
-                  onTap: (latLng) {
-                    setState(() {
-                      if (_markers.length < 2) {
-                        _dropoff = latLng;
-                      } else {
-                        _pickup = latLng;
-                      }
-                      _updateMarkers();
-                    });
+                  onTap: (latLng) async {
+                    if (_markers.length < 2) {
+                      _dropoff = latLng;
+                      final addr = await getAddressFromCoords(latLng.latitude, latLng.longitude);
+                      setState(() => _dropoffController.text = addr);
+                    } else {
+                      _pickup = latLng;
+                      final addr = await getAddressFromCoords(latLng.latitude, latLng.longitude);
+                      setState(() => _pickupController.text = addr);
+                    }
+                    _updateMarkers();
                   },
                 ),
-                Positioned(
-                  top: 16,
-                  left: 16,
-                  child: Card(
-                    color: Colors.white.withOpacity(0.95),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text('TAP MAP TO ADJUST PINS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1, color: VayaTheme.slate)),
+              ),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: VayaTheme.signalCream,
+                  border: Border(top: BorderSide(color: VayaTheme.fog, width: 1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => VehicleSelectionScreen(pickup: _pickup, dropoff: _dropoff),
+                          ),
+                        );
+                      },
+                      child: const Text('Next: Choose Vehicle'),
                     ),
-                  ),
-                )
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: VayaTheme.signalCream,
-              border: Border(top: BorderSide(color: VayaTheme.fog, width: 1)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'CONFIRM DELIVERY LOCATIONS',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
-                  textAlign: TextAlign.center,
+                  ],
                 ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => VehicleSelectionScreen(pickup: _pickup, dropoff: _dropoff),
+              ),
+            ],
+          ),
+          // Search Locations Float Card
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Card(
+              color: Colors.white,
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _pickupController,
+                      style: const TextStyle(fontSize: 14, color: VayaTheme.inkBlack),
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.location_on, color: VayaTheme.saffron),
+                        hintText: 'Search Pickup Location (From)',
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.gps_fixed, color: VayaTheme.saffron),
+                          onPressed: _locateUserPosition,
+                        ),
                       ),
-                    );
-                  },
-                  child: const Text('Next: Choose Vehicle'),
+                      onChanged: (val) => _onSearchChanged(val, 'pickup'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _dropoffController,
+                      style: const TextStyle(fontSize: 14, color: VayaTheme.inkBlack),
+                      decoration: const InputDecoration(
+                        prefixIcon: const Icon(Icons.flag, color: Colors.red),
+                        hintText: 'Search Dropoff Location (To)',
+                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onChanged: (val) => _onSearchChanged(val, 'dropoff'),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
+          // Search Results Dropdown List
+          if (_searchResults.isNotEmpty)
+            Positioned(
+              top: 150,
+              left: 16,
+              right: 16,
+              child: Card(
+                color: Colors.white,
+                elevation: 6,
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 250),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _searchResults.length,
+                    itemBuilder: (ctx, index) {
+                      final res = _searchResults[index];
+                      return ListTile(
+                        leading: const Icon(Icons.location_city, color: VayaTheme.slate),
+                        title: Text(
+                          res['display_name'] ?? '',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13, color: VayaTheme.inkBlack),
+                        ),
+                        onTap: () {
+                          setState(() {
+                            final coords = LatLng(res['lat'], res['lon']);
+                            if (_searchFieldType == 'pickup') {
+                              _pickup = coords;
+                              _pickupController.text = res['display_name'];
+                            } else {
+                              _dropoff = coords;
+                              _dropoffController.text = res['display_name'];
+                            }
+                            _updateMarkers();
+                            _mapController?.animateCamera(CameraUpdate.newLatLngZoom(coords, 14));
+                            _searchResults.clear();
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -726,6 +974,78 @@ class VehicleSelectionScreen extends StatefulWidget {
 class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   String _selectedVehicle = 'bike';
   bool _isLoading = false;
+  List<dynamic> _serverPricing = [];
+  bool _loadingPricing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchPricingConfig();
+  }
+
+  Future<void> _fetchPricingConfig() async {
+    try {
+      final response = await http.get(Uri.parse('$apiBaseUrl/api/pricing-config'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _serverPricing = data['pricing'] ?? [];
+            _loadingPricing = false;
+          });
+        }
+      } else {
+        setState(() => _loadingPricing = false);
+      }
+    } catch (e) {
+      debugPrint("Failed to load live pricing: $e");
+      setState(() => _loadingPricing = false);
+    }
+  }
+
+  double _calculatePrice(String vehicleId) {
+    final double dist = Geolocator.distanceBetween(
+      widget.pickup.latitude,
+      widget.pickup.longitude,
+      widget.dropoff.latitude,
+      widget.dropoff.longitude,
+    ) / 1000.0; // Distance in km
+
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == vehicleId,
+          orElse: () => null,
+        );
+        if (match != null) {
+          final double basePrice = double.parse(match['base_price'].toString());
+          final double baseDistance = double.parse(match['base_distance'].toString());
+          final double perKmPrice = double.parse(match['per_km_price'].toString());
+
+          return basePrice + (dist > baseDistance ? (dist - baseDistance) * perKmPrice : 0.0);
+        }
+      } catch (e) {
+        debugPrint("Error parsing match: $e");
+      }
+    }
+
+    switch (vehicleId) {
+      case 'bike':
+        // Base ₹40 (first 2 km) + ₹10/km
+        return 40.0 + (dist > 2 ? (dist - 2) * 10.0 : 0.0);
+      case 'three_wheeler':
+        // Base ₹120 (first 3 km) + ₹18/km
+        return 120.0 + (dist > 3 ? (dist - 3) * 18.0 : 0.0);
+      case 'ace':
+        // Base ₹250 (first 5 km) + ₹25/km
+        return 250.0 + (dist > 5 ? (dist - 5) * 25.0 : 0.0);
+      case 'truck':
+        // Base ₹500 (first 5 km) + ₹35/km
+        return 500.0 + (dist > 5 ? (dist - 5) * 35.0 : 0.0);
+      default:
+        return 50.0;
+    }
+  }
 
   Future<void> _handleBooking() async {
     setState(() => _isLoading = true);
@@ -734,7 +1054,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
       if (user == null) return;
 
       final token = await user.getIdToken();
-      final estimatedCost = _selectedVehicle == 'bike' ? 50.00 : (_selectedVehicle == 'ace' ? 250.00 : 800.00);
+      final estimatedCost = _calculatePrice(_selectedVehicle);
       
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/booking'),
@@ -782,7 +1102,13 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final str = LocalizedStrings.of(context);
+    final dist = Geolocator.distanceBetween(
+      widget.pickup.latitude,
+      widget.pickup.longitude,
+      widget.dropoff.latitude,
+      widget.dropoff.longitude,
+    ) / 1000.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Choose Vehicle'),
@@ -823,6 +1149,11 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                         ),
                       ],
                     ),
+                    const Divider(height: 24),
+                    Text(
+                      'Distance: ${dist.toStringAsFixed(2)} km',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.liveBlue),
+                    ),
                   ],
                 ),
               ),
@@ -834,40 +1165,50 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: ListView(
-                children: [
-                  _buildVehicleOption(
-                    id: 'bike',
-                    name: str.bike,
-                    desc: 'Quick deliveries up to 20 kg',
-                    price: '₹50.00',
-                    icon: Icons.motorcycle,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildVehicleOption(
-                    id: 'ace',
-                    name: str.miniTruck,
-                    desc: 'Medium cargo up to 500 kg',
-                    price: '₹250.00',
-                    icon: Icons.local_shipping,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildVehicleOption(
-                    id: 'truck',
-                    name: str.largeTruck,
-                    desc: 'Heavy cargo up to 2,000 kg',
-                    price: '₹800.00',
-                    icon: Icons.fire_truck,
-                  ),
-                ],
-              ),
+              child: _loadingPricing 
+                  ? const Center(child: CircularProgressIndicator(color: VayaTheme.saffron))
+                  : ListView(
+                      children: [
+                        _buildVehicleOption(
+                          id: 'bike',
+                          name: 'Bike',
+                          desc: 'Quick deliveries up to 20 kg',
+                          price: '₹${_calculatePrice('bike').toStringAsFixed(2)}',
+                          icon: Icons.motorcycle,
+                        ),
+                        const SizedBox(height: 12),
+                        _buildVehicleOption(
+                          id: 'three_wheeler',
+                          name: 'Cargo 3-wheeler',
+                          desc: 'Medium cargo up to 150 kg',
+                          price: '₹${_calculatePrice('three_wheeler').toStringAsFixed(2)}',
+                          icon: Icons.moped,
+                        ),
+                        const SizedBox(height: 12),
+                        _buildVehicleOption(
+                          id: 'ace',
+                          name: 'Mini Truck (4-wheeler)',
+                          desc: 'Heavy cargo up to 600 kg',
+                          price: '₹${_calculatePrice('ace').toStringAsFixed(2)}',
+                          icon: Icons.local_shipping,
+                        ),
+                        const SizedBox(height: 12),
+                        _buildVehicleOption(
+                          id: 'truck',
+                          name: 'Light Commercial Vehicle (4-wheeler)',
+                          desc: 'Very heavy cargo up to 2,000 kg',
+                          price: '₹${_calculatePrice('truck').toStringAsFixed(2)}',
+                          icon: Icons.fire_truck,
+                        ),
+                      ],
+                    ),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _isLoading ? null : _handleBooking,
               child: _isLoading 
                   ? const Center(child: CircularProgressIndicator(color: Colors.white))
-                  : Text(str.bookNow),
+                  : const Text('Book a VAYA'),
             ),
           ],
         ),
@@ -914,14 +1255,14 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                     name,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                      fontSize: 15,
                       color: isSelected ? VayaTheme.inkBlack : VayaTheme.slate,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     desc,
-                    style: const TextStyle(fontSize: 12, color: VayaTheme.slate),
+                    style: const TextStyle(fontSize: 11, color: VayaTheme.slate),
                   ),
                 ],
               ),
@@ -930,7 +1271,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
               price,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                fontSize: 16,
+                fontSize: 15,
                 color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
               ),
             ),

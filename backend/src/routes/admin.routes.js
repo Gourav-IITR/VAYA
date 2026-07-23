@@ -115,4 +115,50 @@ router.get('/audit-log', async (req, res) => {
   }
 });
 
+// PUT /api/admin/pricing-config - Update pricing rates
+router.put(
+  '/pricing-config',
+  [
+    body('pricing').isArray().withMessage('Pricing must be an array'),
+    body('pricing.*.vehicle_type').notEmpty().withMessage('vehicle_type is required'),
+    body('pricing.*.base_price').isNumeric().withMessage('base_price must be numeric'),
+    body('pricing.*.base_distance').isNumeric().withMessage('base_distance must be numeric'),
+    body('pricing.*.per_km_price').isNumeric().withMessage('per_km_price must be numeric'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      const { pricing } = req.body;
+      const adminUid = req.user.uid;
+
+      for (const item of pricing) {
+        await query(
+          `INSERT INTO pricing_config (vehicle_type, base_price, base_distance, per_km_price)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (vehicle_type) DO UPDATE
+           SET base_price = EXCLUDED.base_price,
+               base_distance = EXCLUDED.base_distance,
+               per_km_price = EXCLUDED.per_km_price`,
+          [item.vehicle_type, item.base_price, item.base_distance, item.per_km_price]
+        );
+      }
+
+      // Log to audit log
+      await query(
+        'INSERT INTO audit_logs (admin_uid, action, details) VALUES ($1, $2, $3)',
+        [adminUid, 'update_pricing', `Updated live vehicle pricing configurations`]
+      );
+
+      res.json({ success: true, message: 'Pricing configuration updated successfully.' });
+    } catch (err) {
+      console.error('PUT /api/admin/pricing-config error:', err);
+      res.status(500).json({ error: 'Failed to update pricing configuration.' });
+    }
+  }
+);
+
 export default router;

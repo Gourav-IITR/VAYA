@@ -65,3 +65,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Pricing Configurations Table
+CREATE TABLE IF NOT EXISTS pricing_config (
+    vehicle_type VARCHAR(50) PRIMARY KEY,
+    base_price DECIMAL(10, 2) NOT NULL,
+    base_distance DOUBLE PRECISION NOT NULL,
+    per_km_price DECIMAL(10, 2) NOT NULL,
+    description VARCHAR(255)
+);
+
+INSERT INTO pricing_config (vehicle_type, base_price, base_distance, per_km_price, description)
+VALUES 
+('bike', 40.00, 2.0, 10.00, 'Quick deliveries up to 20 kg'),
+('three_wheeler', 120.00, 3.0, 18.00, 'Medium cargo up to 150 kg'),
+('ace', 250.00, 5.0, 25.00, 'Heavy cargo up to 600 kg'),
+('truck', 500.00, 5.0, 35.00, 'Very heavy cargo up to 2,000 kg')
+ON CONFLICT (vehicle_type) DO NOTHING;
