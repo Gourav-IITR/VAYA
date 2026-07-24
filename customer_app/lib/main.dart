@@ -1454,8 +1454,12 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   int _helperCount = 0; // 0: No helper, 1: 1 Helper (+150), 2: 2 Helpers (+300)
   String _couponCode = '';
   double _discount = 0.0;
-  String _paymentMethod = 'Cash on Delivery';
+  String _paymentMethod = 'Cash';
   bool _isLoading = false;
+
+  bool _isPickupExpanded = false;
+  bool _isDropoffExpanded = false;
+  final ScrollController _scrollController = ScrollController();
 
   List<dynamic> _serverPricing = [];
   bool _loadingPricing = true;
@@ -1464,6 +1468,12 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   void initState() {
     super.initState();
     _fetchPricingConfig();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchPricingConfig() async {
@@ -1528,7 +1538,9 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
     }
 
     final helperFee = _helperCount * 150.0;
-    final total = baseCost + helperFee - _discount;
+    final taxes = baseCost * 0.05;
+    final platformFee = 10.0;
+    final total = baseCost + helperFee + taxes + platformFee - _discount;
     return total > 0 ? total : 0.0;
   }
 
@@ -1559,7 +1571,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           'estimatedCost': estimatedCost,
           'goodsCategory': _goodsCategory,
           'helpers': _helperCount,
-          'paymentMethod': _paymentMethod,
+          'paymentMethod': _paymentMethod == 'Cash' ? 'Cash on Delivery' : 'UPI / Wallet',
         }),
       );
 
@@ -1588,6 +1600,208 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
     }
   }
 
+  void _showHelpMeChooseSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Help Me Choose a Vehicle',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Select what you want to deliver to get a recommendation:',
+                style: TextStyle(fontSize: 12, color: VayaTheme.slate),
+              ),
+              const SizedBox(height: 16),
+              _buildHelpOption(
+                title: 'Documents, Keys, Food or Small Box',
+                subtitle: 'Recommended: Bike (Up to 20 kg)',
+                vehicleId: 'bike',
+              ),
+              _buildHelpOption(
+                title: 'Appliances, Groceries, or Multiple Cartons',
+                subtitle: 'Recommended: Cargo 3-Wheeler (Up to 150 kg)',
+                vehicleId: 'three_wheeler',
+              ),
+              _buildHelpOption(
+                title: 'Heavy furniture, Fridge, washing machine',
+                subtitle: 'Recommended: Mini Truck (4-Wheeler) (Up to 600 kg)',
+                vehicleId: 'ace',
+              ),
+              _buildHelpOption(
+                title: 'Bulk commercial stock or House shifting',
+                subtitle: 'Recommended: LCV (4-Wheeler) (Up to 2,000 kg)',
+                vehicleId: 'truck',
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHelpOption({
+    required String title,
+    required String subtitle,
+    required String vehicleId,
+  }) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: VayaTheme.fog),
+      ),
+      margin: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        onTap: () {
+          setState(() => _selectedVehicle = vehicleId);
+          Navigator.pop(context);
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: VayaTheme.saffron),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHelperOptionTile({
+    required String title,
+    required String subtitle,
+    required int value,
+    required String priceSuffix,
+  }) {
+    final isSelected = _helperCount == value;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: isSelected ? VayaTheme.saffron : VayaTheme.fog),
+      ),
+      color: isSelected ? VayaTheme.saffron.withOpacity(0.03) : Colors.white,
+      margin: const EdgeInsets.only(bottom: 6),
+      child: InkWell(
+        onTap: () => setState(() => _helperCount = value),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Radio<int>(
+                value: value,
+                groupValue: _helperCount,
+                activeColor: VayaTheme.saffron,
+                onChanged: (val) {
+                  if (val != null) setState(() => _helperCount = val);
+                },
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                        if (priceSuffix.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text(priceSuffix, style: const TextStyle(color: VayaTheme.saffron, fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: const TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentOptionTile({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required String value,
+  }) {
+    final isSelected = _paymentMethod == value;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: isSelected ? VayaTheme.saffron : VayaTheme.fog),
+      ),
+      color: isSelected ? VayaTheme.saffron.withOpacity(0.03) : Colors.white,
+      margin: const EdgeInsets.only(bottom: 6),
+      child: InkWell(
+        onTap: () => setState(() => _paymentMethod = value),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Radio<String>(
+                value: value,
+                groupValue: _paymentMethod,
+                activeColor: VayaTheme.saffron,
+                onChanged: (val) {
+                  if (val != null) setState(() => _paymentMethod = val);
+                },
+              ),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: isSelected ? VayaTheme.saffron.withOpacity(0.12) : VayaTheme.fog.withOpacity(0.4),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 16, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: const TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dist = Geolocator.distanceBetween(
@@ -1599,73 +1813,179 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
 
     final double estFare = _calculatePrice(_selectedVehicle);
 
+    // Compute base fare raw
+    double baseFareRaw = 50.0;
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == _selectedVehicle,
+          orElse: () => null,
+        );
+        if (match != null) {
+          final double basePrice = double.parse(match['base_price'].toString());
+          final double baseDistance = double.parse(match['base_distance'].toString());
+          final double perKmPrice = double.parse(match['per_km_price'].toString());
+          baseFareRaw = basePrice + (dist > baseDistance ? (dist - baseDistance) * perKmPrice : 0.0);
+        }
+      } catch (e) {
+        debugPrint("Error parsing pricing: $e");
+      }
+    } else {
+      switch (_selectedVehicle) {
+        case 'bike':
+          baseFareRaw = 40.0 + (dist > 2 ? (dist - 2) * 10.0 : 0.0);
+          break;
+        case 'three_wheeler':
+          baseFareRaw = 120.0 + (dist > 3 ? (dist - 3) * 18.0 : 0.0);
+          break;
+        case 'ace':
+          baseFareRaw = 250.0 + (dist > 5 ? (dist - 5) * 25.0 : 0.0);
+          break;
+        case 'truck':
+          baseFareRaw = 500.0 + (dist > 5 ? (dist - 5) * 35.0 : 0.0);
+          break;
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Compare Vehicles & Customization'),
+        title: const Text('Choose a vehicle'),
       ),
       body: SingleChildScrollView(
+        controller: _scrollController,
         child: Padding(
-          padding: const EdgeInsets.all(20.0),
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Route Overview Card
               Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: VayaTheme.fog),
+                ),
+                color: Colors.white,
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.all(12.0),
                   child: Column(
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on, color: VayaTheme.saffron, size: 20),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Pickup: ${widget.pickupAddress}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      GestureDetector(
+                        onTap: () => setState(() => _isPickupExpanded = !_isPickupExpanded),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.location_on, color: VayaTheme.routeGreen, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'From: ${widget.pickupAddress}',
+                                maxLines: _isPickupExpanded ? null : 1,
+                                overflow: _isPickupExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: VayaTheme.inkBlack),
+                              ),
                             ),
-                          ),
-                        ],
+                            Icon(
+                              _isPickupExpanded ? Icons.expand_less : Icons.expand_more,
+                              size: 16,
+                              color: VayaTheme.slate,
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => setState(() => _isDropoffExpanded = !_isDropoffExpanded),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.flag, color: Colors.red, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'To: ${widget.dropoffAddress}',
+                                maxLines: _isDropoffExpanded ? null : 1,
+                                overflow: _isDropoffExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: VayaTheme.inkBlack),
+                              ),
+                            ),
+                            Icon(
+                              _isDropoffExpanded ? Icons.expand_less : Icons.expand_more,
+                              size: 16,
+                              color: VayaTheme.slate,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 16),
+                      // Equal columns layout for distance and transit duration
                       Row(
                         children: [
-                          const Icon(Icons.flag, color: Colors.red, size: 20),
-                          const SizedBox(width: 8),
                           Expanded(
-                            child: Text(
-                              'Dropoff: ${widget.dropoffAddress}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Estimated distance', style: TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  dist < 0.05 ? 'Calculating route...' : '${dist.toStringAsFixed(1)} km',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                      const Divider(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Est. Distance: ${dist.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.bold, color: VayaTheme.liveBlue)),
-                          const Text('Est. Transit: ~25 mins', style: TextStyle(fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                          Container(width: 1, height: 26, color: VayaTheme.fog),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Estimated duration', style: TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  dist < 0.05 ? '--' : '~${(dist / 30.0 * 60).round() + 5} min',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-              const Text(
-                'ELIGIBLE VEHICLES',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'ELIGIBLE VEHICLES',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2, color: VayaTheme.slate),
+                  ),
+                  TextButton.icon(
+                    onPressed: _showHelpMeChooseSheet,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(80, 24),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: const Icon(Icons.help_outline, size: 13, color: VayaTheme.saffron),
+                    label: const Text(
+                      'Help me choose',
+                      style: TextStyle(fontSize: 11, color: VayaTheme.saffron, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
               if (_loadingPricing)
-                const Center(child: CircularProgressIndicator(color: VayaTheme.saffron))
+                const Center(child: Padding(
+                  padding: EdgeInsets.all(20.0),
+                  child: CircularProgressIndicator(color: VayaTheme.saffron),
+                ))
               else ...[
                 _buildVehicleOption(
                   id: 'bike',
@@ -1674,8 +1994,9 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                   dimensions: '35 x 35 x 40 cm',
                   eta: '3 mins away',
                   icon: Icons.motorcycle,
+                  cargoExamples: 'Documents, food, small packets',
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 _buildVehicleOption(
                   id: 'three_wheeler',
                   name: 'Cargo 3-Wheeler',
@@ -1683,38 +2004,45 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                   dimensions: '1.2m x 1m x 1m',
                   eta: '5 mins away',
                   icon: Icons.moped,
+                  cargoExamples: 'Medium boxes, crates, retail supplies',
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 _buildVehicleOption(
                   id: 'ace',
-                  name: 'Mini Truck (4-Wheeler)',
+                  name: 'Mini Truck',
                   capacity: 'Up to 600 kg',
                   dimensions: '2.1m x 1.4m x 1.2m',
                   eta: '8 mins away',
                   icon: Icons.local_shipping,
+                  cargoExamples: 'Appliances, furniture, business inventory',
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 _buildVehicleOption(
                   id: 'truck',
-                  name: 'Light Commercial Vehicle (LCV)',
+                  name: 'LCV (4-Wheeler)',
                   capacity: 'Up to 2,000 kg',
                   dimensions: '3.0m x 1.8m x 1.8m',
                   eta: '12 mins away',
                   icon: Icons.fire_truck,
+                  cargoExamples: 'Bulk commercial loads, house shifting',
                 ),
               ],
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
               const Text(
                 'TRIP CUSTOMIZATION',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2, color: VayaTheme.slate),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2, color: VayaTheme.slate),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
               // Goods Category Dropdown
               DropdownButtonFormField<String>(
                 value: _goodsCategory,
-                decoration: const InputDecoration(labelText: 'Goods Category'),
+                decoration: const InputDecoration(
+                  labelText: 'Goods Category',
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(),
+                ),
                 items: const [
                   DropdownMenuItem(value: 'General Cargo', child: Text('General Packages & Boxes')),
                   DropdownMenuItem(value: 'Electronics', child: Text('Electronics & Appliances')),
@@ -1725,139 +2053,239 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                 ],
                 onChanged: (val) => setState(() => _goodsCategory = val!),
               ),
-              const SizedBox(height: 12),
-
-              // Labour / Helper Selection
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Helper / Loading Assistance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          ChoiceChip(
-                            label: const Text('No Helper'),
-                            selected: _helperCount == 0,
-                            onSelected: (_) => setState(() => _helperCount = 0),
-                            selectedColor: VayaTheme.saffron,
-                            labelStyle: TextStyle(color: _helperCount == 0 ? Colors.white : VayaTheme.inkBlack),
-                          ),
-                          const SizedBox(width: 8),
-                          ChoiceChip(
-                            label: const Text('1 Helper (+₹150)'),
-                            selected: _helperCount == 1,
-                            onSelected: (_) => setState(() => _helperCount = 1),
-                            selectedColor: VayaTheme.saffron,
-                            labelStyle: TextStyle(color: _helperCount == 1 ? Colors.white : VayaTheme.inkBlack),
-                          ),
-                          const SizedBox(width: 8),
-                          ChoiceChip(
-                            label: const Text('2 Helpers (+₹300)'),
-                            selected: _helperCount == 2,
-                            onSelected: (_) => setState(() => _helperCount = 2),
-                            selectedColor: VayaTheme.saffron,
-                            labelStyle: TextStyle(color: _helperCount == 2 ? Colors.white : VayaTheme.inkBlack),
-                          ),
-                        ],
+              const SizedBox(height: 6),
+              // Category Restrictions Notice
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  border: Border.all(color: Colors.amber.shade200),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: Colors.amber.shade900),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Restrictions: Fragile items require protective packaging. Prohibited items, hazardous materials, and chemicals are not permitted.',
+                        style: TextStyle(fontSize: 10, color: VayaTheme.slate),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
 
-              // Payment Method Choice
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Payment Method', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          ChoiceChip(
-                            avatar: const Icon(Icons.money, size: 18),
-                            label: const Text('Cash on Delivery'),
-                            selected: _paymentMethod == 'Cash on Delivery',
-                            onSelected: (_) => setState(() => _paymentMethod = 'Cash on Delivery'),
-                            selectedColor: VayaTheme.saffron,
-                            labelStyle: TextStyle(color: _paymentMethod == 'Cash on Delivery' ? Colors.white : VayaTheme.inkBlack),
-                          ),
-                          const SizedBox(width: 8),
-                          ChoiceChip(
-                            avatar: const Icon(Icons.qr_code, size: 18),
-                            label: const Text('UPI / Wallet'),
-                            selected: _paymentMethod == 'UPI / Wallet',
-                            onSelected: (_) => setState(() => _paymentMethod = 'UPI / Wallet'),
-                            selectedColor: VayaTheme.saffron,
-                            labelStyle: TextStyle(color: _paymentMethod == 'UPI / Wallet' ? Colors.white : VayaTheme.inkBlack),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+              // Labour / Helper Selection Stacked Rows
+              const Text(
+                'Helper / Loading Assistance',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
               ),
+              const SizedBox(height: 2),
+              const Text(
+                'Helper supports loading and unloading; driver assistance is not included.',
+                style: TextStyle(fontSize: 11, color: VayaTheme.slate),
+              ),
+              const SizedBox(height: 8),
+              Column(
+                children: [
+                  _buildHelperOptionTile(
+                    title: 'No Helper',
+                    subtitle: 'You will handle all loading and unloading.',
+                    value: 0,
+                    priceSuffix: '',
+                  ),
+                  _buildHelperOptionTile(
+                    title: '1 Helper',
+                    subtitle: '1 helper assists with loading/unloading.',
+                    value: 1,
+                    priceSuffix: '+₹150',
+                  ),
+                  _buildHelperOptionTile(
+                    title: '2 Helpers',
+                    subtitle: '2 helpers assist with loading/unloading.',
+                    value: 2,
+                    priceSuffix: '+₹300',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
 
-              const SizedBox(height: 24),
+              // Payment Method Choices (Stacked rows)
+              const Text(
+                'Payment Method',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
+              ),
+              const SizedBox(height: 8),
+              Column(
+                children: [
+                  _buildPaymentOptionTile(
+                    title: 'Cash',
+                    subtitle: 'Pay directly to the driver at the pickup/drop point.',
+                    icon: Icons.money,
+                    value: 'Cash',
+                  ),
+                  _buildPaymentOptionTile(
+                    title: 'UPI / Wallet',
+                    subtitle: 'Pay digitally via scan-to-pay or integrated wallets.',
+                    icon: Icons.qr_code,
+                    value: 'UPI / Wallet',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
 
               // Itemized Fare Review Card
               Card(
                 color: VayaTheme.signalCream,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('ESTIMATED FARE BREAKDOWN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaTheme.slate)),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Base Transport Fare', style: TextStyle(fontSize: 13)),
-                          Text('₹${(_calculatePrice(_selectedVehicle) - (_helperCount * 150.0)).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        ],
-                      ),
-                      if (_helperCount > 0) ...[
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Loading Assistance ($_helperCount Helper)', style: const TextStyle(fontSize: 13)),
-                            Text('₹${(_helperCount * 150.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          ],
-                        ),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: VayaTheme.fog),
+                ),
+                child: ExpansionTile(
+                  initiallyExpanded: true,
+                  title: const Text(
+                    'Estimated total',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
+                  ),
+                  trailing: Text(
+                    '₹${estFare.toStringAsFixed(0)}',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: VayaTheme.saffron),
+                  ),
+                  childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  expandedAlignment: Alignment.topLeft,
+                  expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+                  shape: const RoundedRectangleBorder(side: BorderSide(color: Colors.transparent)),
+                  collapsedShape: const RoundedRectangleBorder(side: BorderSide(color: Colors.transparent)),
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Base Transport Fare', style: TextStyle(fontSize: 12, color: VayaTheme.slate)),
+                        Text('₹${baseFareRaw.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack)),
                       ],
-                      const Divider(height: 20),
+                    ),
+                    const SizedBox(height: 6),
+                    if (_helperCount > 0) ...[
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Estimated Fare Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack)),
-                          Text('₹${estFare.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: VayaTheme.saffron)),
+                          Text('Helper Loading Fee ($_helperCount helper)', style: const TextStyle(fontSize: 12, color: VayaTheme.slate)),
+                          Text('₹${(_helperCount * 150.0).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack)),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        '* Fare shown is an estimate. Final charge may vary depending on actual tolls, parking, or waiting time exceeding included limits.',
-                        style: TextStyle(fontSize: 10, color: VayaTheme.slate, fontStyle: FontStyle.italic),
+                      const SizedBox(height: 6),
+                    ],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('GST Taxes (5%)', style: TextStyle(fontSize: 12, color: VayaTheme.slate)),
+                        Text('₹${(baseFareRaw * 0.05).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Platform Fee', style: TextStyle(fontSize: 12, color: VayaTheme.slate)),
+                        Text('₹10.00', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack)),
+                      ],
+                    ),
+                    const Divider(height: 12),
+                    const Text(
+                      '* Estimated charges. Final rates might vary due to route changes, parking, tolls, or extra loading wait times.',
+                      style: TextStyle(fontSize: 9, color: VayaTheme.slate, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: VayaTheme.fog.withOpacity(0.5))),
+          boxShadow: const [
+            BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, -2)),
+          ],
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Sticky Selection Bar
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.check_circle_outline, size: 14, color: VayaTheme.routeGreen),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Selected: ${_selectedVehicle == 'bike' ? 'Bike' : _selectedVehicle == 'three_wheeler' ? 'Cargo 3-Wheeler' : _selectedVehicle == 'ace' ? 'Mini Truck' : 'LCV'} · ₹${estFare.toStringAsFixed(0)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack),
                       ),
                     ],
                   ),
+                  TextButton(
+                    onPressed: () {
+                      _scrollController.animateTo(
+                        0,
+                        duration: const Duration(milliseconds: 500),
+                        curve: Curves.easeOut,
+                      );
+                    },
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(50, 24),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'Change',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaTheme.saffron),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Center(
+                child: Text(
+                  'No charge until a driver accepts',
+                  style: TextStyle(fontSize: 10, color: VayaTheme.slate),
                 ),
               ),
-
-              const SizedBox(height: 24),
-
+              const SizedBox(height: 6),
               ElevatedButton(
-                onPressed: _isLoading ? null : _handleBooking,
+                onPressed: (dist < 0.05 || _isLoading) ? null : _handleBooking,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: VayaTheme.saffron,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  disabledBackgroundColor: VayaTheme.fog,
+                ),
                 child: _isLoading 
-                    ? const Center(child: CircularProgressIndicator(color: Colors.white))
-                    : const Text('Confirm Vehicle & Book Now'),
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : Text(
+                        dist < 0.05
+                            ? 'Invalid route selected'
+                            : 'Book ${_selectedVehicle == 'bike' ? 'Bike' : _selectedVehicle == 'three_wheeler' ? 'Cargo 3-Wheeler' : _selectedVehicle == 'ace' ? 'Mini Truck' : 'LCV'} · ₹${estFare.toStringAsFixed(0)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
               ),
             ],
           ),
@@ -1873,63 +2301,107 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
     required String dimensions,
     required String eta,
     required IconData icon,
+    required String cargoExamples,
   }) {
     final isSelected = _selectedVehicle == id;
     final fare = _calculatePrice(id);
+    final cleanEta = eta.replaceAll('mins away', 'min').replaceAll('away', '').trim();
+    final etaText = 'Arrives in $cleanEta';
 
     return InkWell(
       onTap: () => setState(() => _selectedVehicle = id),
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           border: Border.all(
             color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
-            width: isSelected ? 2 : 1,
+            width: isSelected ? 2.0 : 1.0,
           ),
-          borderRadius: BorderRadius.circular(16),
-          color: isSelected ? Colors.white : Colors.white70,
+          borderRadius: BorderRadius.circular(12),
+          color: isSelected ? VayaTheme.saffron.withOpacity(0.04) : Colors.white,
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isSelected ? VayaTheme.saffron.withOpacity(0.15) : VayaTheme.fog.withOpacity(0.4),
+                color: isSelected ? VayaTheme.saffron.withOpacity(0.12) : VayaTheme.fog.withOpacity(0.3),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 30, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
+              child: Icon(icon, size: 24, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: VayaTheme.liveBlue.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
+                      Flexible(
+                        child: Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        child: Text(eta, style: const TextStyle(fontSize: 10, color: VayaTheme.liveBlue, fontWeight: FontWeight.bold)),
                       ),
+                      const SizedBox(width: 6),
+                      if (isSelected)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: VayaTheme.saffron,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check, size: 9, color: Colors.white),
+                              SizedBox(width: 2),
+                              Text('Selected', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text('$capacity • Box: $dimensions', style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$capacity · $dimensions',
+                    style: const TextStyle(fontSize: 10, color: VayaTheme.slate, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Best for: $cargoExamples',
+                    style: TextStyle(fontSize: 9, color: VayaTheme.slate.withOpacity(0.8), fontStyle: FontStyle.italic),
+                  ),
                 ],
               ),
             ),
-            Text(
-              '₹${fare.toStringAsFixed(0)}',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 16,
-                color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
-              ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Est. fare',
+                  style: TextStyle(fontSize: 9, color: VayaTheme.slate.withOpacity(0.6)),
+                ),
+                Text(
+                  '₹${fare.toStringAsFixed(0)}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  etaText,
+                  style: const TextStyle(fontSize: 9, color: VayaTheme.liveBlue, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
           ],
         ),
