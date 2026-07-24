@@ -23,8 +23,19 @@ if ! npx firebase-tools projects:list &>/dev/null; then
   npx firebase-tools login --no-localhost
 fi
 
+# Load from .env.deploy if it exists
+if [ -f .env.deploy ]; then
+  echo ">>> Loading deployment configuration from .env.deploy..."
+  export $(grep -v '^#' .env.deploy | xargs)
+fi
+
 # 2. Gather deployment details
-read -p "Enter your Google Cloud / Firebase Project ID: " PROJECT_ID
+if [ -z "$PROJECT_ID" ]; then
+  read -p "Enter your Google Cloud / Firebase Project ID: " PROJECT_ID
+else
+  echo ">>> Using Project ID: $PROJECT_ID"
+fi
+
 if [ -z "$PROJECT_ID" ]; then
   echo "Project ID is required."
   exit 1
@@ -32,7 +43,12 @@ fi
 
 gcloud config set project "$PROJECT_ID"
 
-read -p "Enter your Neon Postgres Connection URL: " DATABASE_URL
+if [ -z "$DATABASE_URL" ]; then
+  read -p "Enter your Neon Postgres Connection URL: " DATABASE_URL
+else
+  echo ">>> Using Database Connection URL from configuration"
+fi
+
 if [ -z "$DATABASE_URL" ]; then
   echo "Database Connection URL is required."
   exit 1
@@ -41,12 +57,12 @@ fi
 # 3. Configure Web Portal Environment Variables
 echo ""
 echo ">>> Setting up environment configurations for Web Portal & Public Site..."
-read -p "Enter VITE_FIREBASE_API_KEY: " FB_API_KEY
-read -p "Enter VITE_FIREBASE_AUTH_DOMAIN: " FB_AUTH_DOMAIN
-read -p "Enter VITE_FIREBASE_STORAGE_BUCKET: " FB_STORAGE_BUCKET
-read -p "Enter VITE_FIREBASE_MESSAGING_SENDER_ID: " FB_SENDER_ID
-read -p "Enter VITE_FIREBASE_APP_ID: " FB_APP_ID
-read -p "Enter VITE_GOOGLE_MAPS_API_KEY (or press Enter to configure later): " GM_API_KEY
+if [ -z "$FB_API_KEY" ]; then read -p "Enter VITE_FIREBASE_API_KEY: " FB_API_KEY; fi
+if [ -z "$FB_AUTH_DOMAIN" ]; then read -p "Enter VITE_FIREBASE_AUTH_DOMAIN: " FB_AUTH_DOMAIN; fi
+if [ -z "$FB_STORAGE_BUCKET" ]; then read -p "Enter VITE_FIREBASE_STORAGE_BUCKET: " FB_STORAGE_BUCKET; fi
+if [ -z "$FB_SENDER_ID" ]; then read -p "Enter VITE_FIREBASE_MESSAGING_SENDER_ID: " FB_SENDER_ID; fi
+if [ -z "$FB_APP_ID" ]; then read -p "Enter VITE_FIREBASE_APP_ID: " FB_APP_ID; fi
+if [ -z "$GM_API_KEY" ]; then read -p "Enter VITE_GOOGLE_MAPS_API_KEY (or press Enter to configure later): " GM_API_KEY; fi
 
 cat <<EOT > web_portal/.env
 VITE_FIREBASE_API_KEY=$FB_API_KEY
