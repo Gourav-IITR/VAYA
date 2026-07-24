@@ -3313,58 +3313,499 @@ class OrdersScreen extends StatelessWidget {
 }
 
 /// 9. Payments Screen (Payments Tab)
-class PaymentsScreen extends StatelessWidget {
+/// 9. Payments Screen (Payments Tab)
+class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
+
+  @override
+  State<PaymentsScreen> createState() => _PaymentsScreenState();
+}
+
+class _PaymentsScreenState extends State<PaymentsScreen> {
+  int _walletBalance = 500;
+  String _defaultPayment = 'Cash'; // 'Wallet', 'UPI', 'Cash'
+  final ScrollController _scrollController = ScrollController();
+
+  final List<Map<String, dynamic>> _transactions = [
+    {
+      'title': 'Wallet Top-up',
+      'reference': 'TXN-984021',
+      'amount': 500,
+      'isCredit': true,
+      'date': '24 Jul 2026',
+    },
+    {
+      'title': 'Refund booking #VY-729104',
+      'reference': 'TXN-729104R',
+      'amount': 180,
+      'isCredit': true,
+      'date': '22 Jul 2026',
+    },
+    {
+      'title': 'Payment for booking #VY-729104',
+      'reference': 'TXN-729104',
+      'amount': -180,
+      'isCredit': false,
+      'date': '22 Jul 2026',
+    },
+  ];
+
+  void _addMoneyDialog() {
+    int selectedAmount = 500;
+    final customController = TextEditingController();
+    String step = 'input'; // 'input', 'processing', 'success'
+    String selectedSource = 'UPI'; // 'UPI', 'Card', 'NetBanking'
+    String txnRef = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            if (step == 'processing') {
+              return Container(
+                padding: const EdgeInsets.all(24),
+                height: 250,
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: VayaTheme.saffron),
+                    SizedBox(height: 20),
+                    Text('Processing top-up...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    SizedBox(height: 6),
+                    Text('Please do not close or navigate away', style: TextStyle(fontSize: 12, color: VayaTheme.slate)),
+                  ],
+                ),
+              );
+            }
+
+            if (step == 'success') {
+              return Container(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircleAvatar(
+                      backgroundColor: VayaTheme.routeGreen,
+                      radius: 30,
+                      child: Icon(Icons.check, color: Colors.white, size: 36),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Added ₹$selectedAmount successfully!',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Text('Reference: $txnRef', style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: VayaTheme.saffron,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Back to payments', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 20,
+                right: 20,
+                top: 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Add money to wallet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Quick add amounts
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [200, 500, 1000].map((amt) {
+                        final isSel = selectedAmount == amt;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: isSel ? VayaTheme.saffron.withValues(alpha: 0.15) : Colors.white,
+                                side: BorderSide(color: isSel ? VayaTheme.saffron : VayaTheme.slate.withValues(alpha: 0.3)),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                              onPressed: () {
+                                setModalState(() {
+                                  selectedAmount = amt;
+                                  customController.clear();
+                                });
+                              },
+                              child: Text('₹$amt', style: TextStyle(fontWeight: FontWeight.bold, color: isSel ? VayaTheme.saffron : VayaTheme.inkBlack)),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    // Custom amount input
+                    TextField(
+                      controller: customController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Enter custom amount (₹)',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                      onChanged: (val) {
+                        final parsed = int.tryParse(val);
+                        if (parsed != null) {
+                          setModalState(() {
+                            selectedAmount = parsed;
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Funding source', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.slate)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: selectedSource,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'UPI', child: Text('UPI / Google Pay / PhonePe')),
+                        DropdownMenuItem(value: 'Card', child: Text('Credit / Debit Card')),
+                        DropdownMenuItem(value: 'NetBanking', child: Text('Net Banking')),
+                      ],
+                      onChanged: (val) {
+                        setModalState(() {
+                          selectedSource = val!;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: VayaTheme.signalCream,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('• Wallet credits cover full bookings and shipping fare.', style: TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                          Text('• Non-withdrawable closed-loop credits. Expire in 1 year.', style: TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: VayaTheme.saffron,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: selectedAmount <= 0
+                          ? null
+                          : () {
+                              setModalState(() {
+                                step = 'processing';
+                              });
+                              Future.delayed(const Duration(seconds: 1), () {
+                                final ref = 'TXN-${(100000 + (900000 * (selectedAmount % 7) / 7)).round()}';
+                                setState(() {
+                                  _walletBalance += selectedAmount;
+                                  _transactions.insert(0, {
+                                    'title': 'Wallet Top-up',
+                                    'reference': ref,
+                                    'amount': selectedAmount,
+                                    'isCredit': true,
+                                    'date': '25 Jul 2026',
+                                  });
+                                });
+                                setModalState(() {
+                                  step = 'success';
+                                  txnRef = ref;
+                                });
+                              });
+                            },
+                      child: Text('Confirm Add ₹$selectedAmount', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showInfoDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: SingleChildScrollView(child: Text(content, style: const TextStyle(fontSize: 12))),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Payments & Wallet')),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
+      appBar: AppBar(title: const Text('Payments')),
+      body: SingleChildScrollView(
+        controller: _scrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Compact Wallet Card
             Card(
               color: VayaTheme.inkBlack,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('VAYA WALLET BALANCE', style: TextStyle(color: Colors.white70, fontSize: 11, letterSpacing: 1.0)),
-                    const SizedBox(height: 8),
-                    const Text('₹500.00', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: VayaTheme.saffron),
-                      onPressed: () {},
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Wallet Credits'),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('VAYA WALLET', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                            const SizedBox(height: 4),
+                            Text('₹$_walletBalance', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800)),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: VayaTheme.saffron,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: _addMoneyDialog,
+                              icon: const Icon(Icons.add, size: 16),
+                              label: const Text('Add money', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const Divider(color: Colors.white24, height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Non-withdrawable credits', style: TextStyle(color: Colors.white54, fontSize: 10)),
+                        InkWell(
+                          onTap: () {
+                            _scrollController.animateTo(
+                              _scrollController.position.maxScrollExtent - 150,
+                              duration: const Duration(milliseconds: 500),
+                              curve: Curves.easeOut,
+                            );
+                          },
+                          child: const Row(
+                            children: [
+                              Text('View activity', style: TextStyle(color: VayaTheme.saffron, fontSize: 11, fontWeight: FontWeight.bold)),
+                              SizedBox(width: 4),
+                              Icon(Icons.arrow_downward, color: VayaTheme.saffron, size: 12),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            const Text('SAVED PAYMENT METHODS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaTheme.slate)),
-            const SizedBox(height: 12),
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.money, color: VayaTheme.routeGreen),
-                title: Text('Cash on Delivery', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('Pay cash to driver upon cargo arrival'),
-                trailing: Icon(Icons.check_circle, color: VayaTheme.saffron),
-              ),
-            ),
+            const SizedBox(height: 16),
+
+            // Default payment method section
+            const Text('Default payment method', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
             const SizedBox(height: 8),
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.qr_code, color: VayaTheme.liveBlue),
-                title: Text('UPI / Google Pay / PhonePe', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('Instant UPI payment on booking'),
+            // Wallet option
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(
+                  color: _defaultPayment == 'Wallet' ? VayaTheme.saffron : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+              child: RadioListTile<String>(
+                value: 'Wallet',
+                groupValue: _defaultPayment,
+                activeColor: VayaTheme.saffron,
+                title: Row(
+                  children: [
+                    const Text('VAYA Wallet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: VayaTheme.saffron.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text('₹$_walletBalance', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaTheme.saffron)),
+                    ),
+                  ],
+                ),
+                subtitle: const Text('Fastest checkout using wallet credits', style: TextStyle(fontSize: 11)),
+                onChanged: _walletBalance <= 0 ? null : (val) => setState(() => _defaultPayment = val!),
               ),
             ),
+            const SizedBox(height: 6),
+            // UPI option
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(
+                  color: _defaultPayment == 'UPI' ? VayaTheme.saffron : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+              child: RadioListTile<String>(
+                value: 'UPI',
+                groupValue: _defaultPayment,
+                activeColor: VayaTheme.saffron,
+                title: const Text('UPI', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: const Text('Pay using any UPI app (GPay, PhonePe, Paytm)', style: TextStyle(fontSize: 11)),
+                onChanged: (val) => setState(() => _defaultPayment = val!),
+              ),
+            ),
+            const SizedBox(height: 6),
+            // Cash option
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(
+                  color: _defaultPayment == 'Cash' ? VayaTheme.saffron : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+              child: RadioListTile<String>(
+                value: 'Cash',
+                groupValue: _defaultPayment,
+                activeColor: VayaTheme.saffron,
+                title: const Text('Cash', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: const Text('Pay driver in cash after delivery completion', style: TextStyle(fontSize: 11)),
+                onChanged: (val) => setState(() => _defaultPayment = val!),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+              child: Text(
+                'Note: Selected method is pre-filled on booking. You can always change it before placing the order.',
+                style: TextStyle(fontSize: 10, color: VayaTheme.slate),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Recent activity section
+            const Text('Recent activity', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
+            const SizedBox(height: 8),
+            _transactions.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24.0),
+                      child: Text('No transaction history.', style: TextStyle(color: VayaTheme.slate, fontSize: 12)),
+                    ),
+                  )
+                : Card(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _transactions.length,
+                      separatorBuilder: (ctx, i) => const Divider(height: 1),
+                      itemBuilder: (ctx, i) {
+                        final tx = _transactions[i];
+                        final isCr = tx['isCredit'] as bool;
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: isCr ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                            child: Icon(
+                              isCr ? Icons.arrow_downward : Icons.arrow_upward,
+                              color: isCr ? Colors.green : Colors.red,
+                              size: 16,
+                            ),
+                          ),
+                          title: Text(tx['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          subtitle: Text('${tx['date']} • Ref: ${tx['reference']}', style: const TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                          trailing: Text(
+                            '${isCr ? "+" : ""}₹${tx['amount']}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: isCr ? Colors.green : Colors.red,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+            const SizedBox(height: 24),
+
+            // Footer Links
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                TextButton(
+                  onPressed: () => _showInfoDialog('Wallet Terms & Conditions', '• VAYA Wallet is a closed-loop wallet.\n• Wallet balance can be used for booking fare.\n• Balance is non-withdrawable and non-transferable.\n• Promotional credits expire in 30 days.'),
+                  child: const Text('Wallet terms', style: TextStyle(fontSize: 11, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                ),
+                TextButton(
+                  onPressed: () => _showInfoDialog('Refund Rules', '• Order cancellations receive full refund instantly if cancelled before driver arrives.\n• Refund returns automatically to the original source.\n• Promo/discount codes are single-use and cannot be refunded.'),
+                  child: const Text('Refund rules', style: TextStyle(fontSize: 11, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                ),
+                TextButton(
+                  onPressed: () => _showInfoDialog('Payment Support', 'For support or queries regarding failed transactions, contact VAYA support at support@vaya.com or dial +91-1800-VAYA.'),
+                  child: const Text('Failed payments?', style: TextStyle(fontSize: 11, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
