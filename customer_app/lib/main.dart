@@ -830,6 +830,7 @@ class _HomeScreenState extends State<HomeScreen> {
   LatLng _pickup = const LatLng(20.2961, 85.8245); // Master Canteen, Bhubaneswar
   LatLng _dropoff = const LatLng(20.3150, 85.8178); // Patia, Bhubaneswar
   final Set<Marker> _markers = {};
+  final Set<Polyline> _polylines = {};
   GoogleMapController? _mapController;
 
   final TextEditingController _pickupController = TextEditingController();
@@ -917,6 +918,16 @@ class _HomeScreenState extends State<HomeScreen> {
         infoWindow: const InfoWindow(title: 'Destination Location'),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
       ));
+
+      _polylines.clear();
+      if (_pickupController.text.isNotEmpty && _dropoffController.text.isNotEmpty) {
+        _polylines.add(Polyline(
+          polylineId: const PolylineId('route_line'),
+          points: [_pickup, _dropoff],
+          color: VayaTheme.liveBlue,
+          width: 4,
+        ));
+      }
     });
     _fitRouteBounds();
   }
@@ -971,6 +982,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final dist = Geolocator.distanceBetween(
+      _pickup.latitude,
+      _pickup.longitude,
+      _dropoff.latitude,
+      _dropoff.longitude,
+    ) / 1000.0;
+    
+    final durationMin = (dist / 30.0 * 60).round() + 5;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('VΛYΛ'),
@@ -992,6 +1012,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     zoom: 13,
                   ),
                   markers: _markers,
+                  polylines: _polylines,
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
                   onMapCreated: (c) {
@@ -1009,39 +1030,69 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                 decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
                   boxShadow: [
-                    BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2)),
+                    BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2)),
                   ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        if (_pickupController.text.isEmpty || _dropoffController.text.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please select both Pickup and Destination points')),
-                          );
-                          return;
-                        }
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => VehicleSelectionScreen(
-                              pickup: _pickup,
-                              pickupAddress: _pickupController.text,
-                              dropoff: _dropoff,
-                              dropoffAddress: _dropoffController.text,
-                            ),
+                    if (_pickupController.text.isNotEmpty && _dropoffController.text.isNotEmpty) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.route, size: 16, color: VayaTheme.liveBlue),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Route details',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.slate),
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                      icon: const Icon(Icons.local_shipping),
-                      label: const Text('Next: Choose Vehicle & Price'),
+                          Text(
+                            '${dist.toStringAsFixed(1)} km · approximately $durationMin min',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: VayaTheme.saffron,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        disabledBackgroundColor: VayaTheme.fog,
+                      ),
+                      onPressed: (_pickupController.text.isEmpty || _dropoffController.text.isEmpty || dist < 0.05)
+                          ? null
+                          : () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => VehicleSelectionScreen(
+                                    pickup: _pickup,
+                                    pickupAddress: _pickupController.text,
+                                    dropoff: _dropoff,
+                                    dropoffAddress: _dropoffController.text,
+                                  ),
+                                ),
+                              );
+                            },
+                      child: Text(
+                        (_pickupController.text.isEmpty || _dropoffController.text.isEmpty)
+                            ? 'Select points to proceed'
+                            : (dist < 0.05 ? 'Locations too close' : 'Choose vehicle'),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
                     ),
                   ],
                 ),
@@ -1049,7 +1100,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
 
-          // Search Card Float Overlay
+          // Labeled Search Card Float Overlay
           Positioned(
             top: 16,
             left: 16,
@@ -1057,11 +1108,12 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Card(
               color: Colors.white,
               elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   children: [
-                    // Pickup Field
+                    // Pickup Labeled Field
                     InkWell(
                       onTap: () => _openLocationSearchModal('pickup'),
                       child: Container(
@@ -1072,30 +1124,39 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.location_on, color: VayaTheme.saffron, size: 20),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: VayaTheme.saffron.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'PICKUP',
+                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: VayaTheme.saffron),
+                              ),
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 _isLocating
                                     ? 'Locating current position...'
-                                    : (_pickupController.text.isEmpty ? 'From: Select Pickup Point' : _pickupController.text),
+                                    : (_pickupController.text.isEmpty ? 'Where to pick up?' : _pickupController.text),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold,
                                   color: _pickupController.text.isEmpty ? VayaTheme.slate : VayaTheme.inkBlack,
                                 ),
                               ),
                             ),
-                            if (_isLocating)
-                              const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: VayaTheme.saffron)),
+                            const Icon(Icons.edit, size: 14, color: VayaTheme.slate),
                           ],
                         ),
                       ),
                     ),
                     const SizedBox(height: 8),
-                    // Destination Field
+                    // Destination Labeled Field
                     InkWell(
                       onTap: () => _openLocationSearchModal('destination'),
                       child: Container(
@@ -1106,20 +1167,31 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.flag, color: Colors.red, size: 20),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'DROP-OFF',
+                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.red),
+                              ),
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                _dropoffController.text.isEmpty ? 'To: Where to deliver?' : _dropoffController.text,
+                                _dropoffController.text.isEmpty ? 'Where to deliver?' : _dropoffController.text,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold,
                                   color: _dropoffController.text.isEmpty ? VayaTheme.slate : VayaTheme.inkBlack,
                                 ),
                               ),
                             ),
+                            const Icon(Icons.edit, size: 14, color: VayaTheme.slate),
                           ],
                         ),
                       ),
@@ -1157,9 +1229,12 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
     {'title': 'Janpath Market Complex', 'subtitle': 'Ashok Nagar, Janpath, Bhubaneswar'},
   ];
 
+  // Mutable list for Saved Locations with Warehouse, Shop, Supplier, Office custom categories
   final List<Map<String, String>> _savedPlaces = [
-    {'title': 'Home', 'subtitle': 'Plot 102, Saheed Nagar, Bhubaneswar', 'icon': 'home'},
-    {'title': 'Office / Warehouse', 'subtitle': 'Block B, Chandaka Industrial Estate', 'icon': 'work'},
+    {'title': 'Main Warehouse', 'subtitle': 'Plot B, Chandaka Industrial Estate, Patia', 'type': 'Warehouse'},
+    {'title': 'Central Store Shop', 'subtitle': 'Plot 102, Saheed Nagar, Bhubaneswar', 'type': 'Shop'},
+    {'title': 'Suppliers Hub', 'subtitle': 'Unit 4 Market Complex, Bhubaneswar', 'type': 'Supplier'},
+    {'title': 'Head Office', 'subtitle': 'Infocity Road, Patia, Bhubaneswar', 'type': 'Office'},
   ];
 
   void _onQueryChanged(String query) {
@@ -1184,10 +1259,17 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
           final List<dynamic> data = json.decode(res.body);
           if (mounted) {
             setState(() {
-              _predictions = data.map((d) => {
-                'display_name': d['display_name'] as String,
-                'lat': double.parse(d['lat'] as String),
-                'lon': double.parse(d['lon'] as String),
+              _predictions = data.map((d) {
+                final lat = double.parse(d['lat'] as String);
+                final lon = double.parse(d['lon'] as String);
+                // Bounding boxes check for Bhubaneswar: lat [20.15, 20.45], lng [85.65, 85.98]
+                final outside = (lat < 20.15 || lat > 20.45 || lon < 85.65 || lon > 85.98);
+                return {
+                  'display_name': d['display_name'] as String,
+                  'lat': lat,
+                  'lon': lon,
+                  'outside': outside,
+                };
               }).toList();
               _searching = false;
             });
@@ -1199,11 +1281,156 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
     });
   }
 
+  void _deleteSavedPlace(int index) {
+    setState(() {
+      _savedPlaces.removeAt(index);
+    });
+  }
+
+  void _editSavedPlace(int index) {
+    final titleController = TextEditingController(text: _savedPlaces[index]['title']);
+    final subtitleController = TextEditingController(text: _savedPlaces[index]['subtitle']);
+    String selectedType = _savedPlaces[index]['type'] ?? 'Warehouse';
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Edit Saved Location', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleController,
+                decoration: const InputDecoration(labelText: 'Label Name'),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: selectedType,
+                decoration: const InputDecoration(labelText: 'Type'),
+                items: const [
+                  DropdownMenuItem(value: 'Warehouse', child: Text('Warehouse')),
+                  DropdownMenuItem(value: 'Shop', child: Text('Shop')),
+                  DropdownMenuItem(value: 'Office', child: Text('Office')),
+                  DropdownMenuItem(value: 'Supplier', child: Text('Supplier')),
+                  DropdownMenuItem(value: 'Custom', child: Text('Custom')),
+                ],
+                onChanged: (val) => selectedType = val!,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: subtitleController,
+                decoration: const InputDecoration(labelText: 'Address Details'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _savedPlaces[index] = {
+                    'title': titleController.text,
+                    'subtitle': subtitleController.text,
+                    'type': selectedType,
+                  };
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _addSavedPlace() {
+    final titleController = TextEditingController();
+    final subtitleController = TextEditingController();
+    String selectedType = 'Warehouse';
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Add Saved Location', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleController,
+                decoration: const InputDecoration(labelText: 'Label Name (e.g. Warehouse A)'),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: selectedType,
+                decoration: const InputDecoration(labelText: 'Type'),
+                items: const [
+                  DropdownMenuItem(value: 'Warehouse', child: Text('Warehouse')),
+                  DropdownMenuItem(value: 'Shop', child: Text('Shop')),
+                  DropdownMenuItem(value: 'Office', child: Text('Office')),
+                  DropdownMenuItem(value: 'Supplier', child: Text('Supplier')),
+                  DropdownMenuItem(value: 'Custom', child: Text('Custom')),
+                ],
+                onChanged: (val) => selectedType = val!,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: subtitleController,
+                decoration: const InputDecoration(labelText: 'Address Details'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _savedPlaces.add({
+                    'title': titleController.text,
+                    'subtitle': subtitleController.text,
+                    'type': selectedType,
+                  });
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('Add', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _openMapDirectly() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapPinPickerScreen(
+          initialCoords: widget.currentLocation,
+          type: widget.initialType,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      Navigator.pop(context, result);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isPickup = widget.initialType == 'pickup';
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.initialType == 'pickup' ? 'Select Pickup Location' : 'Select Destination'),
+        title: Text(isPickup ? 'Select pickup' : 'Select drop-off'),
       ),
       body: Column(
         children: [
@@ -1215,10 +1442,11 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
               style: const TextStyle(fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search, color: VayaTheme.saffron),
-                hintText: 'Search landmark, street, area or business...',
+                hintText: 'Search area, street or landmark',
                 suffixIcon: _queryController.text.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear),
+                        tooltip: 'Clear search query',
                         onPressed: () {
                           _queryController.clear();
                           setState(() => _predictions.clear());
@@ -1230,26 +1458,19 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
             ),
           ),
 
-          // Map Picker Quick Tile
+          // Map Picker quick tile
           ListTile(
             leading: const CircleAvatar(
               backgroundColor: VayaTheme.saffron,
               child: Icon(Icons.map, color: Colors.white, size: 20),
             ),
-            title: const Text('Choose precise location on Map', style: TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Drag pin to set exact pickup/dropoff gate'),
+            title: const Text('Choose precise location on Map', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            subtitle: Text(
+              isPickup ? 'Drag map to set exact pickup gate' : 'Drag map to set exact drop-off gate',
+              style: const TextStyle(fontSize: 11),
+            ),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              final result = await Navigator.push<Map<String, dynamic>>(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MapPinPickerScreen(initialCoords: widget.currentLocation),
-                ),
-              );
-              if (result != null && context.mounted) {
-                Navigator.pop(context, result);
-              }
-            },
+            onTap: _openMapDirectly,
           ),
           const Divider(height: 1),
 
@@ -1258,15 +1479,47 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
               padding: EdgeInsets.all(20),
               child: CircularProgressIndicator(color: VayaTheme.saffron),
             )
+          else if (_predictions.isEmpty && _queryController.text.trim().length >= 2)
+            Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                children: [
+                  const Icon(Icons.search_off, size: 48, color: VayaTheme.slate),
+                  const SizedBox(height: 10),
+                  const Text('No matching places found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  const Text('Try typing a landmark, or choose directly from the map.', style: TextStyle(fontSize: 11, color: VayaTheme.slate), textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _openMapDirectly,
+                    icon: const Icon(Icons.map),
+                    label: const Text('Open Map Picker'),
+                  ),
+                ],
+              ),
+            )
           else if (_predictions.isNotEmpty)
             Expanded(
               child: ListView.builder(
                 itemCount: _predictions.length,
                 itemBuilder: (ctx, i) {
                   final p = _predictions[i];
+                  final outside = p['outside'] as bool;
                   return ListTile(
                     leading: const Icon(Icons.location_on_outlined, color: VayaTheme.saffron),
-                    title: Text(p['display_name'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    title: RichText(
+                      text: TextSpan(
+                        style: const TextStyle(fontSize: 12, color: VayaTheme.inkBlack),
+                        children: [
+                          if (outside)
+                            const TextSpan(
+                              text: '⚠️ [Outside Service Area] ',
+                              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                            ),
+                          TextSpan(text: p['display_name'], style: const TextStyle(fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
                     onTap: () {
                       Navigator.pop(context, {
                         'address': p['display_name'],
@@ -1281,21 +1534,71 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
             Expanded(
               child: ListView(
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text('SAVED LOCATIONS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('SAVED LOCATIONS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                        TextButton.icon(
+                          onPressed: _addSavedPlace,
+                          icon: const Icon(Icons.add, size: 12),
+                          label: const Text('Add new', style: TextStyle(fontSize: 11)),
+                          style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(60, 20)),
+                        ),
+                      ],
+                    ),
                   ),
-                  ..._savedPlaces.map((sp) => ListTile(
-                        leading: Icon(sp['icon'] == 'home' ? Icons.home : Icons.work, color: VayaTheme.saffron),
-                        title: Text(sp['title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text(sp['subtitle']!, style: const TextStyle(fontSize: 11)),
-                        onTap: () {
-                          Navigator.pop(context, {
-                            'address': sp['subtitle']!,
-                            'coords': widget.currentLocation,
-                          });
-                        },
-                      )),
+                  ..._savedPlaces.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final sp = entry.value;
+                    IconData icon = Icons.warehouse;
+                    if (sp['type'] == 'Shop') icon = Icons.storefront;
+                    if (sp['type'] == 'Office') icon = Icons.work;
+                    if (sp['type'] == 'Supplier') icon = Icons.local_shipping;
+                    if (sp['type'] == 'Home') icon = Icons.home;
+
+                    return ListTile(
+                      leading: Icon(icon, color: VayaTheme.saffron),
+                      title: Row(
+                        children: [
+                          Text(sp['title']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: VayaTheme.slate.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              sp['type'] ?? 'Warehouse',
+                              style: const TextStyle(fontSize: 9, color: VayaTheme.slate, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text(sp['subtitle']!, style: const TextStyle(fontSize: 11)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit, size: 16, color: VayaTheme.slate),
+                            onPressed: () => _editSavedPlace(idx),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, size: 16, color: Colors.red),
+                            onPressed: () => _deleteSavedPlace(idx),
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        Navigator.pop(context, {
+                          'address': sp['subtitle']!,
+                          'coords': widget.currentLocation,
+                        });
+                      },
+                    );
+                  }),
                   const Divider(height: 16),
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1303,15 +1606,15 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
                   ),
                   ..._recentSearches.map((rs) => ListTile(
                         leading: const Icon(Icons.history, color: VayaTheme.slate),
-                        title: Text(rs['title']!, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        title: Text(rs['title']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
                         subtitle: Text(rs['subtitle']!, style: const TextStyle(fontSize: 11)),
                         onTap: () {
                           Navigator.pop(context, {
                             'address': rs['subtitle']!,
                             'coords': widget.currentLocation,
-                          });
-                        },
-                      )),
+                        });
+                      },
+                    )),
                 ],
               ),
             ),
@@ -1324,7 +1627,8 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
 /// Drag Pin Map Location Selector
 class MapPinPickerScreen extends StatefulWidget {
   final LatLng initialCoords;
-  const MapPinPickerScreen({super.key, required this.initialCoords});
+  final String type; // 'pickup' or 'destination' / 'dropoff'
+  const MapPinPickerScreen({super.key, required this.initialCoords, required this.type});
 
   @override
   State<MapPinPickerScreen> createState() => _MapPinPickerScreenState();
@@ -1334,6 +1638,7 @@ class _MapPinPickerScreenState extends State<MapPinPickerScreen> {
   late LatLng _center;
   String _address = 'Resolving location...';
   bool _loading = false;
+  GoogleMapController? _mapController;
 
   @override
   void initState() {
@@ -1369,54 +1674,270 @@ class _MapPinPickerScreenState extends State<MapPinPickerScreen> {
     }
   }
 
+  Future<Map<String, dynamic>?> _showAddressDetailsDialog(BuildContext context, String type, String baseAddress) async {
+    final formKey = GlobalKey<FormState>();
+    String houseNo = '';
+    String floor = '';
+    String landmark = '';
+    String contactPerson = '';
+    String instructions = '';
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Add ${type == 'pickup' ? 'pickup' : 'drop-off'} details',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: VayaTheme.inkBlack),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    baseAddress,
+                    style: const TextStyle(fontSize: 11, color: VayaTheme.slate),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Flat / House / Building No *',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null,
+                    onSaved: (val) => houseNo = val ?? '',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Floor / Wing (Optional)',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    onSaved: (val) => floor = val ?? '',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Nearby Landmark *',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null,
+                    onSaved: (val) => landmark = val ?? '',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Contact Person (Optional)',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    onSaved: (val) => contactPerson = val ?? '',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Driver Instructions (e.g. gate, loading rules)',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    onSaved: (val) => instructions = val ?? '',
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: VayaTheme.saffron,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () {
+                      if (formKey.currentState!.validate()) {
+                        formKey.currentState!.save();
+                        Navigator.pop(ctx, {
+                          'houseNo': houseNo,
+                          'floor': floor,
+                          'landmark': landmark,
+                          'contactPerson': contactPerson,
+                          'instructions': instructions,
+                        });
+                      }
+                    },
+                    child: const Text('Save address details', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isPickup = widget.type == 'pickup';
+    
+    // Detect low-confidence pins
+    bool isLowConfidence = _address.split(',').length < 4 ||
+        _address.toLowerCase().contains('municipal corporation') ||
+        _address.toLowerCase().contains('zone') ||
+        _address.toLowerCase().contains('district');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Confirm Map Location')),
+      appBar: AppBar(title: Text(isPickup ? 'Confirm pickup' : 'Confirm drop-off')),
       body: Stack(
         children: [
           GoogleMap(
             initialCameraPosition: CameraPosition(target: _center, zoom: 16),
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            onMapCreated: (c) => _mapController = c,
             onCameraMove: (pos) => _center = pos.target,
             onCameraIdle: () => _resolveAddress(_center),
           ),
+
+          // Central Fixed pin pointing to target center
           const Center(
-            child: Icon(Icons.location_on, size: 48, color: VayaTheme.saffron),
+            child: Padding(
+              padding: EdgeInsets.only(bottom: 32.0), // half height offset
+              child: Icon(Icons.location_on, size: 48, color: VayaTheme.saffron),
+            ),
           ),
+
+          // Recenter FAB Control
+          Positioned(
+            bottom: 210,
+            right: 16,
+            child: FloatingActionButton.small(
+              backgroundColor: Colors.white,
+              foregroundColor: VayaTheme.saffron,
+              onPressed: () {
+                _mapController?.animateCamera(CameraUpdate.newLatLngZoom(widget.initialCoords, 16));
+              },
+              child: const Icon(Icons.my_location),
+            ),
+          ),
+
+          // Instruction Overlay Banner
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Card(
+              color: Colors.white,
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 16, color: VayaTheme.saffron),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isPickup 
+                            ? 'Move map to place the pin at the pickup gate.' 
+                            : 'Move map to place the pin at the drop-off gate.',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Bottom Confirmation Panel Card
           Positioned(
             bottom: 24,
             left: 16,
             right: 16,
             child: Card(
               color: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.place, color: VayaTheme.saffron),
+                        const Icon(Icons.place, color: VayaTheme.saffron, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _loading ? 'Fetching address...' : _address,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            _loading ? 'Locating...' : _address,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: VayaTheme.inkBlack),
                             maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    if (isLowConfidence && !_loading) ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        '⚠️ This pin appears to be in a general area. Move it closer to the entrance or gate.',
+                        style: TextStyle(fontSize: 10, color: Colors.amber, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                      onPressed: () {
-                        Navigator.pop(context, {
-                          'address': _address,
-                          'coords': _center,
-                        });
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: VayaTheme.saffron,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () async {
+                        // Request precise address details modal
+                        final details = await _showAddressDetailsDialog(context, widget.type, _address);
+                        if (details != null && context.mounted) {
+                          String finalAddress = "${details['houseNo']}";
+                          if (details['floor']!.isNotEmpty) finalAddress += ", Floor ${details['floor']}";
+                          finalAddress += " (Landmark: ${details['landmark']})";
+                          if (details['contactPerson']!.isNotEmpty) finalAddress += ", Contact: ${details['contactPerson']}";
+                          if (details['instructions']!.isNotEmpty) finalAddress += " [Instructions: ${details['instructions']}]";
+                          finalAddress += ", $_address";
+
+                          Navigator.pop(context, {
+                            'address': finalAddress,
+                            'coords': _center,
+                          });
+                        }
                       },
-                      child: const Text('Confirm This Location'),
+                      child: Text(isPickup ? 'Confirm pickup location' : 'Confirm drop-off location'),
                     ),
                   ],
                 ),
