@@ -3814,56 +3814,327 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 }
 
 /// 10. Account & Settings Screen (Account Tab)
-class AccountScreen extends StatelessWidget {
+class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    return Scaffold(
-      appBar: AppBar(title: const Text('My Account')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Card(
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: VayaTheme.saffron,
-                child: Icon(Icons.person, color: Colors.white),
+  State<AccountScreen> createState() => _AccountScreenState();
+}
+
+class _AccountScreenState extends State<AccountScreen> {
+  String _name = 'Gourav Mahunta';
+  String _phone = '+91 98765 43210';
+  String _email = 'gourav@vaya.com';
+  bool _phoneVerified = true;
+
+  String _gstin = '21AAAAA1111A1Z1'; 
+  String _gstStatus = 'Verified'; // 'Not added', 'Pending', 'Verified'
+  String _companyName = 'VAYA Logistics Pvt Ltd';
+
+  bool _notificationsEnabled = true;
+  String _appLanguage = 'English';
+
+  final List<Map<String, String>> _addresses = [
+    {'label': 'Main Warehouse', 'details': 'Plot B, Chandaka Industrial Estate, Patia, Bhubaneswar', 'default': 'pickup'},
+    {'label': 'Janpath Retail Store', 'details': 'Plot 102, Janpath Road, Saheed Nagar, Bhubaneswar', 'default': 'dropoff'},
+    {'label': 'Secondary Supplier', 'details': 'Unit 4 Market Complex, Bhubaneswar', 'default': 'none'},
+    {'label': 'Default Office', 'details': 'Infocity Road, Patia, Bhubaneswar', 'default': 'none'},
+  ];
+
+  void _editProfileDialog() {
+    final nameCtrl = TextEditingController(text: _name);
+    final phoneCtrl = TextEditingController(text: _phone);
+    final emailCtrl = TextEditingController(text: _email);
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Edit profile', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Full Name'),
               ),
-              title: Text(user?.displayName ?? 'VAYA Customer', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(user?.phoneNumber ?? '+91 9876543210'),
-              trailing: const Icon(Icons.edit, color: VayaTheme.slate),
+              const SizedBox(height: 8),
+              TextField(
+                controller: phoneCtrl,
+                decoration: const InputDecoration(labelText: 'Phone Number'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: emailCtrl,
+                decoration: const InputDecoration(labelText: 'Email Address'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _name = nameCtrl.text;
+                  _phone = phoneCtrl.text;
+                  _email = emailCtrl.text;
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _addressManagerDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Saved addresses', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  TextButton.icon(
+                    onPressed: () {
+                      setModalState(() {
+                        _addresses.add({
+                          'label': 'New Location',
+                          'details': 'Plot 5, VIP Area, Bhubaneswar',
+                          'default': 'none',
+                        });
+                      });
+                      setState(() {});
+                    },
+                    icon: const Icon(Icons.add, size: 14),
+                    label: const Text('Add', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _addresses.length,
+                  separatorBuilder: (c, i) => const Divider(),
+                  itemBuilder: (c, i) {
+                    final addr = _addresses[i];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(addr['label']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      subtitle: Text(addr['details']!, style: const TextStyle(fontSize: 10)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (addr['default'] != 'none')
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: VayaTheme.saffron.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                addr['default'] == 'pickup' ? 'Pickup' : 'Drop-off',
+                                style: const TextStyle(fontSize: 8, color: VayaTheme.saffron, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, size: 16, color: Colors.red),
+                            onPressed: () {
+                              setModalState(() {
+                                _addresses.removeAt(i);
+                              });
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _gstDialog() {
+    final companyCtrl = TextEditingController(text: _companyName);
+    final gstinCtrl = TextEditingController(text: _gstin);
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Business & tax details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: companyCtrl,
+                decoration: const InputDecoration(labelText: 'Registered business name'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: gstinCtrl,
+                decoration: const InputDecoration(labelText: 'GSTIN (15-digit code)'),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Current status: $_gstStatus',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: _gstStatus == 'Verified' ? Colors.green : Colors.amber,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 20),
-          const ListTile(
-            leading: Icon(Icons.place, color: VayaTheme.saffron),
-            title: Text('Saved Addresses'),
-            subtitle: Text('Home, Warehouse, Office'),
-            trailing: Icon(Icons.chevron_right),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _gstin = '';
+                  _companyName = '';
+                  _gstStatus = 'Not added';
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text('Remove GSTIN', style: TextStyle(color: Colors.red)),
+            ),
+            TextButton(
+              onPressed: () {
+                final gstText = gstinCtrl.text.trim();
+                if (gstText.length == 15) {
+                  setState(() {
+                    _gstin = gstText;
+                    _companyName = companyCtrl.text;
+                    _gstStatus = 'Verified';
+                  });
+                } else {
+                  setState(() {
+                    _gstin = gstText;
+                    _companyName = companyCtrl.text;
+                    _gstStatus = 'Pending verification';
+                  });
+                }
+                Navigator.pop(ctx);
+              },
+              child: const Text('Save & Verify', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showHelpCenter() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Help Centre', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Q: How is distance calculated?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('A: Distance is computed along the routing path from Bhubaneswar map servers.\n', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+              Text('Q: Can I load fragile goods?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('A: Yes, select Helper options for assistance, and add remarks for fragile handling.\n', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+              Text('Q: How do refunds work?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('A: Cancellations made before driver assignment are refunded instantly to your original payment method.\n', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+            ],
           ),
-          const Divider(),
-          const ListTile(
-            leading: Icon(Icons.business, color: VayaTheme.liveBlue),
-            title: Text('Business Profile & GST Billing'),
-            subtitle: Text('Add GSTIN for tax invoices'),
-            trailing: Icon(Icons.chevron_right),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  void _showContactSupport() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Contact support', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Our 24x7 operations helpline is active for active delivery issues and disputes.', style: TextStyle(fontSize: 12)),
+            SizedBox(height: 12),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Helpline dialed: 1800-102-VAYA')),
+              );
+            },
+            child: const Text('Call support', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
-          const Divider(),
-          const ListTile(
-            leading: Icon(Icons.help_outline, color: VayaTheme.routeGreen),
-            title: Text('Help & 24x7 Customer Support'),
-            subtitle: Text('FAQs, Safety & Dispute Assistance'),
-            trailing: Icon(Icons.chevron_right),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Chat initialized. Driver details loaded.')),
+              );
+            },
+            child: const Text('Chat now', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-            onTap: () async {
+        ],
+      ),
+    );
+  }
+
+  void _showDisputes() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Active cases & disputes', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Case ID: #DISP-89201', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            Text('Issue: Driver refund delay', style: TextStyle(fontSize: 11)),
+            Text('Status: Under investigation (expected closure 24 hrs)', style: TextStyle(fontSize: 11, color: Colors.amber, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  void _confirmSignOut() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sign out of VAYA?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: const Text('Active bookings will remain in transit and will not be cancelled. Do you want to sign out on this device?', style: TextStyle(fontSize: 12)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
               await FirebaseAuth.instance.signOut();
-              if (context.mounted) {
+              if (mounted) {
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -3871,8 +4142,271 @@ class AccountScreen extends StatelessWidget {
                 );
               }
             },
+            child: const Text('Sign out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showInfoDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: SingleChildScrollView(child: Text(content, style: const TextStyle(fontSize: 12))),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Account')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Profile Card (Whole card is tappable to edit)
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: _editProfileDialog,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      const CircleAvatar(
+                        radius: 24,
+                        backgroundColor: VayaTheme.saffron,
+                        child: Icon(Icons.person, color: Colors.white, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_name.isEmpty ? 'Add your name' : _name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack)),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                Text(_phone, style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                                if (_phoneVerified) ...[
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.verified, size: 11, color: VayaTheme.liveBlue),
+                                ],
+                              ],
+                            ),
+                            if (_email.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(_email, style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.edit, size: 16, color: VayaTheme.slate),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Logistics Section
+            const Text('Logistics', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: ListTile(
+                leading: const SizedBox(width: 24, child: Icon(Icons.place_outlined, color: VayaTheme.slate)),
+                title: const Text('Saved addresses', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: Text('${_addresses.length} saved warehouse, office and shop locations', style: const TextStyle(fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: _addressManagerDialog,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Business & Billing Section
+            const Text('Business & billing', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: ListTile(
+                leading: const SizedBox(width: 24, child: Icon(Icons.business_outlined, color: VayaTheme.slate)),
+                title: const Text('Business & tax details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: Text('Status: $_gstStatus • Click to edit details', style: const TextStyle(fontSize: 11)),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: _gstDialog,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Preferences Section
+            const Text('Preferences', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    value: _notificationsEnabled,
+                    activeColor: VayaTheme.saffron,
+                    title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: const Text('Enabled for dispatch and transit alerts', style: TextStyle(fontSize: 11)),
+                    onChanged: (val) => setState(() => _notificationsEnabled = val),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.language, color: VayaTheme.slate)),
+                    title: const Text('App language', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: Text('Current language: $_appLanguage', style: const TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: () {
+                      setState(() {
+                        _appLanguage = _appLanguage == 'English' ? 'Odia' : 'English';
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Language switched to $_appLanguage')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Help & Safety Section
+            const Text('Help & safety', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.help_center_outlined, color: VayaTheme.slate)),
+                    title: const Text('Help centre', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: const Text('Browse FAQs and shipping guidelines', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: _showHelpCenter,
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.support_agent_outlined, color: VayaTheme.slate)),
+                    title: const Text('Contact support', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: const Text('24x7 Chat, helpline and callback options', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: _showContactSupport,
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.gavel_outlined, color: VayaTheme.slate)),
+                    title: const Text('Disputes & refund cases', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: const Text('Track refund case status and updates', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: _showDisputes,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Privacy & Legal Section
+            const Text('Privacy & legal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.security, color: VayaTheme.slate)),
+                    title: const Text('Privacy policy & terms', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: const Text('Read our data and grievance practices', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: () {
+                      _showInfoDialog('Privacy policy & terms', 'VAYA values your data privacy. We collect geo-coordinates solely for route calculation and delivery dispatch tracking. Read the full document at https://vaya.com/privacy-policy.');
+                    },
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.download, color: VayaTheme.slate)),
+                    title: const Text('Download my data', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: const Text('Export a copy of your bookings and billing ledger', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Data export initiated. Check your email.')),
+                      );
+                    },
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const SizedBox(width: 24, child: Icon(Icons.delete_forever, color: Colors.red)),
+                    title: const Text('Delete account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red)),
+                    subtitle: const Text('Permanently remove profile and billing records', style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete your VAYA account?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 15)),
+                          content: const Text('Warning: This action is permanent. Deleting your account will remove your wallet credits, booking history, and business profile. Proceed?', style: TextStyle(fontSize: 12)),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Account deletion requested. Account deactivated.')),
+                                );
+                              },
+                              child: const Text('Confirm Deletion', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Sign out row
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              child: ListTile(
+                leading: const SizedBox(width: 24, child: Icon(Icons.logout, color: Colors.red)),
+                title: const Text('Sign out', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red)),
+                onTap: _confirmSignOut,
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // App version footer
+            const Center(
+              child: Text(
+                'VAYA Customer • Version 1.4.2 (Build 20260725)',
+                style: TextStyle(fontSize: 10, color: VayaTheme.slate),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
