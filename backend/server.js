@@ -97,9 +97,21 @@ wss.on('connection', (ws, request, decodedToken) => {
   registerClient(ws, decodedToken);
   console.log(`🔌 WS Client Connected: ${decodedToken.uid} (${decodedToken.role || 'no-role'})`);
 
-  ws.on('close', () => {
+  ws.on('close', async () => {
     unregisterClient(ws);
     console.log(`🔌 WS Client Disconnected: ${decodedToken.uid}`);
+    try {
+      if (decodedToken.uid) {
+        const driverRes = await query('SELECT status FROM drivers WHERE id = $1', [decodedToken.uid]);
+        if (driverRes.rows.length > 0 && driverRes.rows[0].status === 'online') {
+          await query("UPDATE drivers SET status = 'offline' WHERE id = $1", [decodedToken.uid]);
+          broadcast({ type: 'driver_status', driverId: decodedToken.uid, status: 'offline' });
+          console.log(`🔴 Auto-set driver ${decodedToken.uid} to offline on disconnect.`);
+        }
+      }
+    } catch (e) {
+      console.error('Error setting driver offline on disconnect:', e.message);
+    }
   });
 
   ws.on('error', (err) => {

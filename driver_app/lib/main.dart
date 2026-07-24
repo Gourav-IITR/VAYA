@@ -593,9 +593,74 @@ class DriverMainNavigation extends StatefulWidget {
   State<DriverMainNavigation> createState() => _DriverMainNavigationState();
 }
 
-class _DriverMainNavigationState extends State<DriverMainNavigation> {
+class _DriverMainNavigationState extends State<DriverMainNavigation> with WidgetsBindingObserver {
   int _currentIndex = 0;
   Map<String, dynamic>? _activeJob;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkActiveJob();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached || state == AppLifecycleState.paused) {
+      _setOfflineOnClose();
+    }
+  }
+
+  Future<void> _setOfflineOnClose() async {
+    // If driver is not in an active job, mark status offline when app is closed/detached
+    if (_activeJob == null) {
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) return;
+        final token = await user.getIdToken();
+        await http.post(
+          Uri.parse('$apiBaseUrl/api/driver/status'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token'
+          },
+          body: json.encode({'status': 'offline'}),
+        );
+      } catch (e) {
+        debugPrint("Error setting offline on app close: $e");
+      }
+    }
+  }
+
+  Future<void> _checkActiveJob() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/booking/active'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted && data['exists'] == true) {
+          setState(() {
+            _activeJob = data['booking'];
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error checking active job on restart: $e");
+    }
+  }
 
   void _onJobStateChanged(Map<String, dynamic>? job) {
     setState(() {
@@ -1344,17 +1409,71 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
 }
 
 /// 7. Driver Trips History Screen (Trips Tab)
-class DriverTripsScreen extends StatelessWidget {
+class DriverTripsScreen extends StatefulWidget {
   final Map<String, dynamic> driverData;
   const DriverTripsScreen({super.key, required this.driverData});
 
   @override
+  State<DriverTripsScreen> createState() => _DriverTripsScreenState();
+}
+
+class _DriverTripsScreenState extends State<DriverTripsScreen> {
+  bool _isLoading = true;
+  List<dynamic> _trips = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTrips();
+  }
+
+  Future<void> _fetchTrips() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/driver/trips'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted && data['success'] == true) {
+          setState(() {
+            _trips = data['trips'] ?? [];
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint("Error fetching driver trips: $e");
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final completedTrips = _trips.where((t) => t['status'] == 'completed').toList();
+    final cancelledTrips = _trips.where((t) => t['status'] == 'cancelled').toList();
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Trip History'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                setState(() => _isLoading = true);
+                _fetchTrips();
+              },
+            ),
+          ],
           bottom: const TabBar(
             labelColor: VayaDriverTheme.saffron,
             indicatorColor: VayaDriverTheme.saffron,
@@ -1364,94 +1483,192 @@ class DriverTripsScreen extends StatelessWidget {
             ],
           ),
         ),
-        body: TabBarView(
-          children: [
-            Padding(
-              padding: EdgeInsets.all(16.0),
-              child: ListView(
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: VayaDriverTheme.saffron))
+            : TabBarView(
                 children: [
-                  Card(
-                    child: ListTile(
-                      leading: Icon(Icons.check_circle, color: VayaDriverTheme.routeGreen),
-                      title: Text('Trip #VY-81920', style: TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('Master Canteen -> Saheed Nagar • ₹160'),
-                      trailing: Text('Completed', style: TextStyle(color: VayaDriverTheme.routeGreen, fontSize: 11)),
-                    ),
-                  ),
+                  _buildTripList(completedTrips, isCompleted: true),
+                  _buildTripList(cancelledTrips, isCompleted: false),
                 ],
               ),
-            ),
-            Center(child: Text('No cancelled trips.', style: TextStyle(color: VayaDriverTheme.slate))),
-          ],
-        ),
       ),
+    );
+  }
+
+  Widget _buildTripList(List<dynamic> list, {required bool isCompleted}) {
+    if (list.isEmpty) {
+      return Center(
+        child: Text(
+          isCompleted ? 'No completed trips yet.' : 'No cancelled trips.',
+          style: const TextStyle(color: VayaDriverTheme.slate),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16.0),
+      itemCount: list.length,
+      itemBuilder: (context, index) {
+        final item = list[index];
+        final idStr = (item['id']?.toString() ?? '1000').substring(0, 6).toUpperCase();
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ListTile(
+            leading: Icon(
+              isCompleted ? Icons.check_circle : Icons.cancel,
+              color: isCompleted ? VayaDriverTheme.routeGreen : Colors.red,
+            ),
+            title: Text('Trip #VY-$idStr', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('${item['pickup_name']} ➔ ${item['dropoff_name']}'),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('₹${item['estimated_cost']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 2),
+                Text(
+                  isCompleted ? 'Completed' : 'Cancelled',
+                  style: TextStyle(
+                    color: isCompleted ? VayaDriverTheme.routeGreen : Colors.red,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
 /// 8. Driver Earnings & Payouts Screen (Earnings Tab)
-class DriverEarningsScreen extends StatelessWidget {
+class DriverEarningsScreen extends StatefulWidget {
   final Map<String, dynamic> driverData;
   const DriverEarningsScreen({super.key, required this.driverData});
 
   @override
+  State<DriverEarningsScreen> createState() => _DriverEarningsScreenState();
+}
+
+class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
+  bool _isLoading = true;
+  double _totalGross = 0.0;
+  int _completedCount = 0;
+  double _todayGross = 0.0;
+  double _platformFee = 0.0;
+  double _netEarnings = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchEarningsStats();
+  }
+
+  Future<void> _fetchEarningsStats() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final token = await user.getIdToken();
+
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/driver/earnings-stats'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (mounted && data['success'] == true) {
+          final stats = data['stats'];
+          setState(() {
+            _totalGross = (stats['totalGross'] as num).toDouble();
+            _completedCount = (stats['completedCount'] as num).toInt();
+            _todayGross = (stats['todayGross'] as num).toDouble();
+            _platformFee = (stats['platformFee'] as num).toDouble();
+            _netEarnings = (stats['netEarnings'] as num).toDouble();
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint("Error fetching earnings stats: $e");
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Earnings & Payouts')),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Card(
-              color: const Color(0xFF1A1A17),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('THIS WEEK\'S EARNINGS', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 11, letterSpacing: 1.0)),
-                    const SizedBox(height: 8),
-                    const Text('₹2,450.00', style: TextStyle(color: VayaDriverTheme.saffron, fontSize: 32, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text('Trips Completed: 12', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 12)),
-                        Text('Payout Status: Settled', style: TextStyle(color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text('EARNINGS BREAKDOWN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaDriverTheme.slate)),
-            const SizedBox(height: 12),
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.local_taxi, color: VayaDriverTheme.saffron),
-                title: Text('Trip Gross Fares'),
-                trailing: Text('₹2,600.00', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ),
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.card_giftcard, color: VayaDriverTheme.routeGreen),
-                title: Text('Incentives & Bonuses'),
-                trailing: Text('+₹200.00', style: TextStyle(fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen)),
-              ),
-            ),
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.remove_circle_outline, color: Colors.red),
-                title: Text('Platform Fee (10%)'),
-                trailing: Text('-₹350.00', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-              ),
-            ),
-          ],
-        ),
+      appBar: AppBar(
+        title: const Text('Earnings & Payouts'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              setState(() => _isLoading = true);
+              _fetchEarningsStats();
+            },
+          ),
+        ],
       ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: VayaDriverTheme.saffron))
+          : Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Card(
+                    color: const Color(0xFF1A1A17),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('TOTAL NET EARNINGS', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 11, letterSpacing: 1.0)),
+                          const SizedBox(height: 8),
+                          Text('₹${_netEarnings.toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.saffron, fontSize: 32, fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Total Trips Completed: $_completedCount', style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 12)),
+                              Text('Today: ₹${_todayGross.toStringAsFixed(0)}', style: const TextStyle(color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text('EARNINGS BREAKDOWN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaDriverTheme.slate)),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.local_taxi, color: VayaDriverTheme.saffron),
+                      title: const Text('Trip Gross Fares'),
+                      trailing: Text('₹${_totalGross.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                      title: const Text('Platform Fee (10%)'),
+                      trailing: Text('-₹${_platformFee.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                    ),
+                  ),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.account_balance_wallet, color: VayaDriverTheme.routeGreen),
+                      title: const Text('Net Balance Credited'),
+                      trailing: Text('₹${_netEarnings.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -1484,6 +1701,18 @@ class DriverAccountScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
+          ListTile(
+            leading: const Icon(Icons.phone, color: VayaDriverTheme.signalCream),
+            title: const Text('Phone Number'),
+            subtitle: Text(driverData['phone'] ?? user?.phoneNumber ?? 'Not provided'),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.fitness_center, color: VayaDriverTheme.signalCream),
+            title: const Text('Max Weight Capacity'),
+            subtitle: Text('${driverData['weight_capacity'] ?? 20} kg'),
+          ),
+          const Divider(),
           const ListTile(
             leading: Icon(Icons.verified, color: VayaDriverTheme.routeGreen),
             title: Text('Document Verification Status'),

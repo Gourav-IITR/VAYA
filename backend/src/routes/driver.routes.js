@@ -12,16 +12,74 @@ router.get('/today-earnings', verifyToken, async (req, res) => {
   try {
     const uid = req.user.uid;
     const result = await query(
-      `SELECT COALESCE(SUM(estimated_cost), 0) AS today_earnings 
+      `SELECT COALESCE(SUM(estimated_cost), 0) AS today_earnings, COUNT(*) AS today_count
        FROM bookings 
        WHERE driver_id = $1 AND status = 'completed' AND DATE(created_at) = CURRENT_DATE`,
       [uid]
     );
     const earnings = parseFloat(result.rows[0].today_earnings || 0);
-    res.json({ success: true, todayEarnings: earnings });
+    const count = parseInt(result.rows[0].today_count || 0);
+    res.json({ success: true, todayEarnings: earnings, todayCount: count });
   } catch (err) {
     console.error('GET /api/driver/today-earnings error:', err);
     res.status(500).json({ error: 'Failed to fetch today earnings' });
+  }
+});
+
+// GET /api/driver/trips - Fetch real trip history for the driver
+router.get('/trips', verifyToken, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const result = await query(
+      `SELECT * FROM bookings WHERE driver_id = $1 ORDER BY created_at DESC`,
+      [uid]
+    );
+    res.json({ success: true, trips: result.rows });
+  } catch (err) {
+    console.error('GET /api/driver/trips error:', err);
+    res.status(500).json({ error: 'Failed to fetch driver trips' });
+  }
+});
+
+// GET /api/driver/earnings-stats - Fetch detailed real earnings breakdown
+router.get('/earnings-stats', verifyToken, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const completedRes = await query(
+      `SELECT COALESCE(SUM(estimated_cost), 0) AS total_gross, COUNT(*) AS completed_count
+       FROM bookings 
+       WHERE driver_id = $1 AND status = 'completed'`,
+      [uid]
+    );
+    const todayRes = await query(
+      `SELECT COALESCE(SUM(estimated_cost), 0) AS today_gross, COUNT(*) AS today_count
+       FROM bookings 
+       WHERE driver_id = $1 AND status = 'completed' AND DATE(created_at) = CURRENT_DATE`,
+      [uid]
+    );
+
+    const totalGross = parseFloat(completedRes.rows[0].total_gross || 0);
+    const completedCount = parseInt(completedRes.rows[0].completed_count || 0);
+    const todayGross = parseFloat(todayRes.rows[0].today_gross || 0);
+    const todayCount = parseInt(todayRes.rows[0].today_count || 0);
+
+    const platformFee = totalGross * 0.10; // 10% platform fee
+    const netEarnings = totalGross - platformFee;
+
+    res.json({
+      success: true,
+      stats: {
+        totalGross,
+        completedCount,
+        todayGross,
+        todayCount,
+        platformFee,
+        netEarnings,
+      }
+    });
+  } catch (err) {
+    console.error('GET /api/driver/earnings-stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch earnings stats' });
   }
 });
 
