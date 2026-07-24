@@ -207,7 +207,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 }
 
-// i18n Strings dictionary
+// i18n Strings dictionary — comprehensive translation catalog
 class LocalizedStrings {
   final Locale locale;
   LocalizedStrings(this.locale);
@@ -216,14 +216,111 @@ class LocalizedStrings {
     return LocalizedStrings(Localizations.localeOf(context));
   }
 
-  String get selectLang => locale.languageCode == 'or' ? 'ଭାଷା ଚୟନ କରନ୍ତୁ' : locale.languageCode == 'hi' ? 'भाषा चुनें' : 'Select Language';
+  String _t(String en, String or, String hi) =>
+      locale.languageCode == 'or' ? or : locale.languageCode == 'hi' ? hi : en;
+
+  // Common
+  String get selectLang => _t('Select Language', 'ଭାଷା ଚୟନ କରନ୍ତୁ', 'भाषा चुनें');
   String get welcome => 'VAYA';
-  String get mobileLogin => locale.languageCode == 'or' ? 'ମୋବାଇଲ୍ ଲଗ୍ ଇନ୍' : locale.languageCode == 'hi' ? 'मोबाइल लॉगिन' : 'Mobile Login';
-  String get enterMobile => locale.languageCode == 'or' ? '୧୦-ଅଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ଦିଅନ୍ତୁ' : locale.languageCode == 'hi' ? '10-अंकीय मोबाइल नंबर दर्ज करें' : 'Enter 10-digit Mobile Number';
-  String get sendOtp => locale.languageCode == 'or' ? 'OTP ପଠାନ୍ତୁ' : locale.languageCode == 'hi' ? 'ओटीपी भेजें' : 'Send OTP';
-  String get verifyOtp => locale.languageCode == 'or' ? 'OTP ଯାଞ୍ଚ କରନ୍ତୁ' : locale.languageCode == 'hi' ? 'ओटीपी सत्यापित करें' : 'Verify OTP';
-  String get bookNow => locale.languageCode == 'or' ? 'ବୁକିଂ କରନ୍ତୁ' : locale.languageCode == 'hi' ? 'बुकिंग करें' : 'Book a VAYA';
-  String get tracking => locale.languageCode == 'or' ? 'ବୁକିଂ ଟ୍ରାକ୍' : locale.languageCode == 'hi' ? 'ट्रैकिंग' : 'Track VAYA';
+  String get cancel => _t('Cancel', 'ବାତିଲ୍', 'रद्द करें');
+  String get save => _t('Save', 'ସେଭ୍ କରନ୍ତୁ', 'सहेजें');
+  String get close => _t('Close', 'ବନ୍ଦ କରନ୍ତୁ', 'बंद करें');
+  String get confirm => _t('Confirm', 'ନିଶ୍ଚିତ କରନ୍ତୁ', 'पुष्टि करें');
+  String get loading => _t('Loading...', 'ଲୋଡ୍ ହେଉଛି...', 'लोड हो रहा है...');
+  String get done => _t('Done', 'ସମ୍ପୂର୍ଣ୍ଣ', 'पूर्ण');
+
+  // Login
+  String get mobileLogin => _t('Mobile Login', 'ମୋବାଇଲ୍ ଲଗ୍ ଇନ୍', 'मोबाइल लॉगिन');
+  String get enterMobile => _t('Enter 10-digit Mobile Number', '୧୦-ଅଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ଦିଅନ୍ତୁ', '10-अंकीय मोबाइल नंबर दर्ज करें');
+  String get sendOtp => _t('Send OTP', 'OTP ପଠାନ୍ତୁ', 'ओटीपी भेजें');
+  String get verifyOtp => _t('Verify OTP', 'OTP ଯାଞ୍ଚ କରନ୍ତୁ', 'ओटीपी सत्यापित करें');
+
+  // Home
+  String get whereToPickup => _t('Where to pick up?', 'କେଉଁଠୁ ଉଠାଇବେ?', 'कहाँ से उठाना है?');
+  String get whereToDeliver => _t('Where to deliver?', 'କେଉଁଠି ପହଞ୍ଚାଇବେ?', 'कहाँ पहुँचाना है?');
+  String get locatingPosition => _t('Locating current position...', 'ସ୍ଥାନ ଖୋଜୁଛି...', 'वर्तमान स्थान खोज रहा है...');
+  String get routeDetails => _t('Route details', 'ରୁଟ୍ ବିବରଣୀ', 'मार्ग विवरण');
+  String get chooseVehicle => _t('Choose vehicle', 'ଗାଡ଼ି ଚୟନ କରନ୍ତୁ', 'वाहन चुनें');
+  String get selectPointsToProceed => _t('Select points to proceed', 'ଆଗକୁ ବଢ଼ିବା ପାଇଁ ସ୍ଥାନ ଚୟନ କରନ୍ତୁ', 'आगे बढ़ने के लिए स्थान चुनें');
+  String get locationsTooClose => _t('Locations too close', 'ସ୍ଥାନ ବହୁ ନିକଟ', 'स्थान बहुत पास हैं');
+  String get pickup => _t('PICKUP', 'ପିକଅପ୍', 'पिकअप');
+  String get dropoff => _t('DROP-OFF', 'ଡ୍ରପ୍-ଅଫ୍', 'ड्रॉप-ऑफ');
+
+  // Location Search
+  String get selectPickup => _t('Select pickup', 'ପିକଅପ୍ ଚୟନ', 'पिकअप चुनें');
+  String get selectDropoff => _t('Select drop-off', 'ଡ୍ରପ୍-ଅଫ୍ ଚୟନ', 'ड्रॉप-ऑफ चुनें');
+  String get searchPlaceholder => _t('Search area, street or landmark', 'ସ୍ଥାନ, ରାସ୍ତା ବା ଲ୍ୟାଣ୍ଡମାର୍କ ଖୋଜନ୍ତୁ', 'स्थान, सड़क या लैंडमार्क खोजें');
+  String get useMyCurrentLocation => _t('Use my current location', 'ମୋ ବର୍ତ୍ତମାନ ସ୍ଥାନ ବ୍ୟବହାର କରନ୍ତୁ', 'मेरा वर्तमान स्थान उपयोग करें');
+  String get fetchingLocation => _t('Fetching your location...', 'ଆପଣଙ୍କ ସ୍ଥାନ ଖୋଜୁଛି...', 'आपका स्थान खोज रहा है...');
+  String get chooseOnMap => _t('Choose precise location on Map', 'ମାନଚିତ୍ରରେ ସଠିକ ସ୍ଥାନ ଚୟନ', 'मानचित्र पर सटीक स्थान चुनें');
+  String get savedLocations => _t('SAVED LOCATIONS', 'ସଞ୍ଚିତ ସ୍ଥାନ', 'सहेजे गए स्थान');
+  String get recentSearches => _t('RECENT SEARCHES', 'ନିକଟ ଅନୁସନ୍ଧାନ', 'हाल की खोजें');
+  String get noMatchingPlaces => _t('No matching places found', 'କୌଣସି ସ୍ଥାନ ମିଳିଲା ନାହିଁ', 'कोई मिलता-जुलता स्थान नहीं मिला');
+  String get addNew => _t('Add new', 'ନୂଆ ଯୋଡ଼ନ୍ତୁ', 'नया जोड़ें');
+
+  // Vehicle Selection
+  String get bookNow => _t('Book a VAYA', 'ବୁକିଂ କରନ୍ତୁ', 'बुकिंग करें');
+  String get helpMeChoose => _t('Help me choose', 'ମୋତେ ସାହାଯ୍ୟ କରନ୍ତୁ', 'मुझे चुनने में मदद करें');
+  String get helpMeChooseTitle => _t('Help Me Choose a Vehicle', 'ଗାଡ଼ି ଚୟନ ସାହାଯ୍ୟ', 'वाहन चुनने में मदद');
+  String get helpMeChooseSubtitle => _t('Select what you want to deliver to get a recommendation:', 'ସୁପାରିଶ ପାଇବା ପାଇଁ ଆପଣ କ\'ଣ ବିତରଣ କରିବାକୁ ଚାହାନ୍ତି ଚୟନ କରନ୍ତୁ:', 'सिफारिश पाने के लिए चुनें कि आप क्या भेजना चाहते हैं:');
+  String get fareBreakdown => _t('Fare Breakdown', 'ଭଡ଼ା ବିବରଣୀ', 'किराया विवरण');
+  String get baseFare => _t('Base fare', 'ମୂଳ ଭଡ଼ା', 'बेस किराया');
+  String get distanceCharge => _t('Distance charge', 'ଦୂରତା ମୂଲ୍ୟ', 'दूरी शुल्क');
+  String get helperCharge => _t('Helper charge', 'ସହାୟକ ମୂଲ୍ୟ', 'सहायक शुल्क');
+  String get estimatedFare => _t('Estimated fare', 'ଅନୁମାନିତ ଭଡ଼ା', 'अनुमानित किराया');
+  String get customization => _t('Customization', 'କଷ୍ଟମାଇଜେସନ୍', 'अनुकूलन');
+  String get goodsCategory => _t('Goods Category', 'ସାମଗ୍ରୀ ଶ୍ରେଣୀ', 'सामान श्रेणी');
+  String get paymentMethod => _t('Payment Method', 'ଦେୟ ପଦ୍ଧତି', 'भुगतान विधि');
+
+  // Tracking
+  String get tracking => _t('Track VAYA', 'ବୁକିଂ ଟ୍ରାକ୍', 'ट्रैकिंग');
+  String get searchingDrivers => _t('Searching nearby drivers...', 'ନିକଟବର୍ତ୍ତୀ ଡ୍ରାଇଭର୍ ଖୋଜୁଛି...', 'नज़दीकी ड्राइवर खोज रहा है...');
+  String get cancelBooking => _t('Cancel booking', 'ବୁକିଂ ବାତିଲ୍ କରନ୍ତୁ', 'बुकिंग रद्द करें');
+  String get cancelConfirmTitle => _t('Cancel this booking?', 'ଏହି ବୁକିଂ ବାତିଲ୍ କରିବେ?', 'यह बुकिंग रद्द करें?');
+  String get cancelConfirmMsg => _t('Are you sure you want to cancel? If a driver has already been assigned, a cancellation fee may apply.', 'ଆପଣ ନିଶ୍ଚିତ କି ଆପଣ ବାତିଲ୍ କରିବାକୁ ଚାହାନ୍ତି? ଯଦି ଏକ ଡ୍ରାଇଭର ଆସାଇନ୍ ହୋଇସାରିଛି, ବାତିଲ୍ ଶୁଳ୍କ ଲାଗୁ ହୋଇପାରେ।', 'क्या आप वाकई रद्द करना चाहते हैं? यदि ड्राइवर पहले से नियुक्त है, तो रद्दीकरण शुल्क लग सकता है।');
+  String get shareTracking => _t('Share Live Tracking Link', 'ଲାଇଭ୍ ଟ୍ରାକିଂ ଲିଙ୍କ ସେୟାର୍ କରନ୍ତୁ', 'लाइव ट्रैकिंग लिंक साझा करें');
+  String get pickupVerificationOtp => _t('PICKUP VERIFICATION OTP', 'ପିକଅପ୍ ଯାଞ୍ଚ OTP', 'पिकअप सत्यापन OTP');
+  String get shareWithDriver => _t('Share with driver upon arrival', 'ପହଞ୍ଚିଲେ ଡ୍ରାଇଭରଙ୍କ ସହ ସେୟାର୍ କରନ୍ତୁ', 'पहुँचने पर ड्राइवर को बताएं');
+
+  // Orders
+  String get myDeliveries => _t('My Deliveries', 'ମୋ ଡେଲିଭରୀ', 'मेरी डिलीवरी');
+  String get active => _t('Active', 'ସକ୍ରିୟ', 'सक्रिय');
+  String get completed => _t('Completed', 'ସମ୍ପୂର୍ଣ୍ଣ', 'पूर्ण');
+  String get cancelled => _t('Cancelled', 'ବାତିଲ୍', 'रद्द');
+  String get trackOrder => _t('Track Order', 'ଅର୍ଡର ଟ୍ରାକ୍ କରନ୍ତୁ', 'ऑर्डर ट्रैक करें');
+
+  // Payments
+  String get paymentsAndWallet => _t('Payments & Wallet', 'ଦେୟ ଏବଂ ୱାଲେଟ୍', 'भुगतान और वॉलेट');
+  String get walletBalance => _t('Wallet Balance', 'ୱାଲେଟ୍ ବାଲାନ୍ସ', 'वॉलेट बैलेंस');
+  String get addMoney => _t('Add money', 'ଟଙ୍କା ଯୋଡ଼ନ୍ତୁ', 'पैसे जोड़ें');
+  String get viewActivity => _t('View activity', 'କାର୍ଯ୍ୟକଳାପ ଦେଖନ୍ତୁ', 'गतिविधि देखें');
+  String get defaultPaymentMethod => _t('Default Payment Method', 'ଡିଫଲ୍ଟ ଦେୟ ପଦ୍ଧତି', 'डिफ़ॉल्ट भुगतान विधि');
+  String get wallet => _t('VAYA Wallet', 'VAYA ୱାଲେଟ୍', 'VAYA वॉलेट');
+  String get upiPayment => _t('UPI Payment', 'UPI ଦେୟ', 'UPI भुगतान');
+  String get cashOnDelivery => _t('Cash on Delivery', 'ବିତରଣ ସମୟରେ ନଗଦ', 'कैश ऑन डिलीवरी');
+  String get recentTransactions => _t('Recent Transactions', 'ନିକଟ ଲେନଦେନ', 'हाल के लेनदेन');
+
+  // Account
+  String get account => _t('Account', 'ଖାତା', 'खाता');
+  String get editProfile => _t('Edit profile', 'ପ୍ରୋଫାଇଲ୍ ସଂପାଦନା', 'प्रोफ़ाइल संपादित करें');
+  String get logistics => _t('Logistics', 'ଲଜିଷ୍ଟିକ୍ସ', 'लॉजिस्टिक्स');
+  String get savedAddresses => _t('Saved addresses', 'ସଞ୍ଚିତ ଠିକଣା', 'सहेजे गए पते');
+  String get businessAndBilling => _t('Business & billing', 'ବ୍ୟବସାୟ ଏବଂ ବିଲିଂ', 'व्यवसाय और बिलिंग');
+  String get businessTaxDetails => _t('Business & tax details', 'ବ୍ୟବସାୟ ଏବଂ ଟ୍ୟାକ୍ସ ବିବରଣୀ', 'व्यवसाय और कर विवरण');
+  String get preferences => _t('Preferences', 'ପସନ୍ଦ', 'प्राथमिकताएँ');
+  String get notifications => _t('Notifications', 'ବିଜ୍ଞପ୍ତି', 'सूचनाएँ');
+  String get appLanguage => _t('App language', 'ଆପ୍ ଭାଷା', 'ऐप भाषा');
+  String get helpAndSafety => _t('Help & safety', 'ସାହାଯ୍ୟ ଏବଂ ସୁରକ୍ଷା', 'सहायता और सुरक्षा');
+  String get helpCentre => _t('Help centre', 'ସାହାଯ୍ୟ କେନ୍ଦ୍ର', 'सहायता केंद्र');
+  String get contactSupport => _t('Contact support', 'ସହାୟତା ସମ୍ପର୍କ', 'सहायता से संपर्क');
+  String get disputesRefunds => _t('Disputes & refund cases', 'ବିବାଦ ଏବଂ ରିଫଣ୍ଡ', 'विवाद और रिफंड');
+  String get privacyAndLegal => _t('Privacy & legal', 'ଗୋପନୀୟତା ଏବଂ ଆଇନ', 'गोपनीयता और कानूनी');
+  String get privacyPolicy => _t('Privacy policy & terms', 'ଗୋପନୀୟତା ନୀତି ଏବଂ ସର୍ତ୍ତାବଳୀ', 'गोपनीयता नीति और शर्तें');
+  String get downloadMyData => _t('Download my data', 'ମୋ ଡାଟା ଡାଉନଲୋଡ୍', 'मेरा डेटा डाउनलोड करें');
+  String get deleteAccount => _t('Delete account', 'ଖାତା ବିଲୋପ', 'खाता हटाएं');
+  String get signOut => _t('Sign out', 'ସାଇନ୍ ଆଉଟ୍', 'साइन आउट');
+  String get signOutConfirm => _t('Sign out of VAYA?', 'VAYA ରୁ ସାଇନ୍ ଆଉଟ୍ କରିବେ?', 'VAYA से साइन आउट करें?');
+  String get chooseLanguage => _t('Choose language', 'ଭାଷା ଚୟନ କରନ୍ତୁ', 'भाषा चुनें');
 }
 
 /// 1. Language Picker Screen
@@ -1221,6 +1318,7 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
   final TextEditingController _queryController = TextEditingController();
   List<Map<String, dynamic>> _predictions = [];
   bool _searching = false;
+  bool _fetchingCurrentLocation = false;
   Timer? _debounce;
 
   final List<Map<String, String>> _recentSearches = [
@@ -1237,6 +1335,75 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
     {'title': 'Head Office', 'subtitle': 'Infocity Road, Patia, Bhubaneswar', 'type': 'Office'},
   ];
 
+  Future<Map<String, dynamic>?> _geocodeAddress(String address) async {
+    final url = 'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(address)}&limit=1';
+    try {
+      final res = await http.get(
+        Uri.parse(url),
+        headers: {'Accept-Language': 'en', 'User-Agent': 'VAYACustomerApp/1.0'},
+      );
+      if (res.statusCode == 200) {
+        final List<dynamic> data = json.decode(res.body);
+        if (data.isNotEmpty) {
+          return {
+            'lat': double.parse(data[0]['lat'] as String),
+            'lon': double.parse(data[0]['lon'] as String),
+            'display_name': data[0]['display_name'] as String,
+          };
+        }
+      }
+    } catch (e) {
+      debugPrint('Geocode error: $e');
+    }
+    return null;
+  }
+
+  Future<void> _useCurrentLocation() async {
+    setState(() => _fetchingCurrentLocation = true);
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+        Position pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        );
+        // Reverse geocode
+        final url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.latitude}&lon=${pos.longitude}';
+        String address = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+        try {
+          final res = await http.get(Uri.parse(url), headers: {'User-Agent': 'VAYACustomerApp/1.0'});
+          if (res.statusCode == 200) {
+            final data = json.decode(res.body);
+            address = data['display_name'] ?? address;
+          }
+        } catch (_) {}
+        if (mounted) {
+          Navigator.pop(context, {
+            'address': address,
+            'coords': LatLng(pos.latitude, pos.longitude),
+          });
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permission denied. Please enable it in Settings.')),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Current location error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not determine your location. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _fetchingCurrentLocation = false);
+    }
+  }
+
   void _onQueryChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     if (query.trim().length < 2) {
@@ -1247,9 +1414,9 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
       return;
     }
     setState(() => _searching = true);
-    _debounce = Timer(const Duration(milliseconds: 400), () async {
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
       final viewbox = '85.70,20.40,85.95,20.20';
-      final url = 'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&viewbox=$viewbox&bounded=1&limit=6';
+      final url = 'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${Uri.encodeComponent(query)}&viewbox=$viewbox&limit=8';
       try {
         final res = await http.get(
           Uri.parse(url),
@@ -1262,10 +1429,20 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
               _predictions = data.map((d) {
                 final lat = double.parse(d['lat'] as String);
                 final lon = double.parse(d['lon'] as String);
-                // Bounding boxes check for Bhubaneswar: lat [20.15, 20.45], lng [85.65, 85.98]
                 final outside = (lat < 20.15 || lat > 20.45 || lon < 85.65 || lon > 85.98);
+                // Build a short name from address details if available
+                final addr = d['address'] as Map<String, dynamic>?;
+                String shortName = '';
+                if (addr != null) {
+                  shortName = addr['amenity'] ?? addr['building'] ?? addr['road'] ?? addr['neighbourhood'] ?? '';
+                }
+                if (shortName.isEmpty) {
+                  final fullName = d['display_name'] as String;
+                  shortName = fullName.split(',').first.trim();
+                }
                 return {
                   'display_name': d['display_name'] as String,
+                  'short_name': shortName,
                   'lat': lat,
                   'lon': lon,
                   'outside': outside,
@@ -1427,10 +1604,11 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
   @override
   Widget build(BuildContext context) {
     final isPickup = widget.initialType == 'pickup';
+    final l = LocalizedStrings.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isPickup ? 'Select pickup' : 'Select drop-off'),
+        title: Text(isPickup ? l.selectPickup : l.selectDropoff),
       ),
       body: Column(
         children: [
@@ -1442,7 +1620,7 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
               style: const TextStyle(fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search, color: VayaTheme.saffron),
-                hintText: 'Search area, street or landmark',
+                hintText: l.searchPlaceholder,
                 suffixIcon: _queryController.text.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear),
@@ -1458,13 +1636,34 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
             ),
           ),
 
+          // Use my current location tile
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: VayaTheme.liveBlue.withValues(alpha: 0.15),
+              child: _fetchingCurrentLocation
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: VayaTheme.liveBlue))
+                  : const Icon(Icons.my_location, color: VayaTheme.liveBlue, size: 20),
+            ),
+            title: Text(
+              _fetchingCurrentLocation ? l.fetchingLocation : l.useMyCurrentLocation,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.liveBlue),
+            ),
+            subtitle: Text(
+              isPickup ? 'Set pickup to your GPS position' : 'Set drop-off to your GPS position',
+              style: const TextStyle(fontSize: 11),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _fetchingCurrentLocation ? null : _useCurrentLocation,
+          ),
+          const Divider(height: 1),
+
           // Map Picker quick tile
           ListTile(
             leading: const CircleAvatar(
               backgroundColor: VayaTheme.saffron,
               child: Icon(Icons.map, color: Colors.white, size: 20),
             ),
-            title: const Text('Choose precise location on Map', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            title: Text(l.chooseOnMap, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             subtitle: Text(
               isPickup ? 'Drag map to set exact pickup gate' : 'Drag map to set exact drop-off gate',
               style: const TextStyle(fontSize: 11),
@@ -1486,7 +1685,7 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
                 children: [
                   const Icon(Icons.search_off, size: 48, color: VayaTheme.slate),
                   const SizedBox(height: 10),
-                  const Text('No matching places found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(l.noMatchingPlaces, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   const SizedBox(height: 6),
                   const Text('Try typing a landmark, or choose directly from the map.', style: TextStyle(fontSize: 11, color: VayaTheme.slate), textAlign: TextAlign.center),
                   const SizedBox(height: 16),
@@ -1505,24 +1704,50 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
                 itemBuilder: (ctx, i) {
                   final p = _predictions[i];
                   final outside = p['outside'] as bool;
+                  final shortName = p['short_name'] as String? ?? '';
+                  final fullName = p['display_name'] as String;
+                  // Build a secondary line from fullName minus shortName
+                  String secondary = fullName;
+                  if (shortName.isNotEmpty && fullName.startsWith(shortName)) {
+                    secondary = fullName.substring(shortName.length).replaceFirst(RegExp(r'^,\s*'), '');
+                  }
+
                   return ListTile(
-                    leading: const Icon(Icons.location_on_outlined, color: VayaTheme.saffron),
-                    title: RichText(
-                      text: TextSpan(
-                        style: const TextStyle(fontSize: 12, color: VayaTheme.inkBlack),
-                        children: [
-                          if (outside)
-                            const TextSpan(
-                              text: '⚠️ [Outside Service Area] ',
-                              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                    leading: Icon(
+                      outside ? Icons.location_off_outlined : Icons.location_on_outlined,
+                      color: outside ? Colors.red : VayaTheme.saffron,
+                    ),
+                    title: Row(
+                      children: [
+                        if (outside)
+                          Container(
+                            margin: const EdgeInsets.only(right: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
                             ),
-                          TextSpan(text: p['display_name'], style: const TextStyle(fontWeight: FontWeight.w600)),
-                        ],
-                      ),
+                            child: const Text('Outside area', style: TextStyle(fontSize: 8, color: Colors.red, fontWeight: FontWeight.bold)),
+                          ),
+                        Expanded(
+                          child: Text(
+                            shortName.isNotEmpty ? shortName : fullName.split(',').first,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    subtitle: Text(
+                      secondary,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: VayaTheme.slate),
                     ),
                     onTap: () {
                       Navigator.pop(context, {
-                        'address': p['display_name'],
+                        'address': fullName,
                         'coords': LatLng(p['lat'], p['lon']),
                       });
                     },
@@ -1539,11 +1764,11 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('SAVED LOCATIONS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                        Text(l.savedLocations, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
                         TextButton.icon(
                           onPressed: _addSavedPlace,
                           icon: const Icon(Icons.add, size: 12),
-                          label: const Text('Add new', style: TextStyle(fontSize: 11)),
+                          label: Text(l.addNew, style: const TextStyle(fontSize: 11)),
                           style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(60, 20)),
                         ),
                       ],
@@ -1567,7 +1792,7 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                             decoration: BoxDecoration(
-                              color: VayaTheme.slate.withOpacity(0.1),
+                              color: VayaTheme.slate.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -1591,30 +1816,42 @@ class _FullScreenLocationSearchState extends State<FullScreenLocationSearch> {
                           ),
                         ],
                       ),
-                      onTap: () {
-                        Navigator.pop(context, {
-                          'address': sp['subtitle']!,
-                          'coords': widget.currentLocation,
-                        });
+                      onTap: () async {
+                        // Geocode the saved address to get real coordinates
+                        final geo = await _geocodeAddress('${sp['subtitle']}, Bhubaneswar');
+                        if (mounted) {
+                          Navigator.pop(context, {
+                            'address': sp['subtitle']!,
+                            'coords': geo != null
+                                ? LatLng(geo['lat'], geo['lon'])
+                                : widget.currentLocation,
+                          });
+                        }
                       },
                     );
                   }),
                   const Divider(height: 16),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: Text('RECENT SEARCHES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: Text(l.recentSearches, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
                   ),
                   ..._recentSearches.map((rs) => ListTile(
                         leading: const Icon(Icons.history, color: VayaTheme.slate),
                         title: Text(rs['title']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
                         subtitle: Text(rs['subtitle']!, style: const TextStyle(fontSize: 11)),
-                        onTap: () {
-                          Navigator.pop(context, {
-                            'address': rs['subtitle']!,
-                            'coords': widget.currentLocation,
-                        });
-                      },
-                    )),
+                        onTap: () async {
+                          // Geocode recent search address to get real coordinates
+                          final geo = await _geocodeAddress('${rs['subtitle']}, Bhubaneswar');
+                          if (mounted) {
+                            Navigator.pop(context, {
+                              'address': rs['subtitle']!,
+                              'coords': geo != null
+                                  ? LatLng(geo['lat'], geo['lon'])
+                                  : widget.currentLocation,
+                            });
+                          }
+                        },
+                      )),
                 ],
               ),
             ),
@@ -1973,7 +2210,6 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   String _selectedVehicle = 'bike';
   String _goodsCategory = 'General Cargo';
   int _helperCount = 0; // 0: No helper, 1: 1 Helper (+150), 2: 2 Helpers (+300)
-  String _couponCode = '';
   double _discount = 0.0;
   String _paymentMethod = 'Cash';
   bool _isLoading = false;
@@ -2122,51 +2358,76 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
   }
 
   void _showHelpMeChooseSheet() {
+    final l = LocalizedStrings.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Help Me Choose a Vehicle',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack),
+        return DraggableScrollableSheet(
+          initialChildSize: 0.55,
+          minChildSize: 0.3,
+          maxChildSize: 0.85,
+          expand: false,
+          builder: (context, scrollController) {
+            return SingleChildScrollView(
+              controller: scrollController,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Drag handle
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: VayaTheme.slate.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      l.helpMeChooseTitle,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      l.helpMeChooseSubtitle,
+                      style: const TextStyle(fontSize: 12, color: VayaTheme.slate),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildHelpOption(
+                      title: 'Documents, Keys, Food or Small Box',
+                      subtitle: 'Recommended: Bike (Up to 20 kg)',
+                      vehicleId: 'bike',
+                    ),
+                    _buildHelpOption(
+                      title: 'Appliances, Groceries, or Multiple Cartons',
+                      subtitle: 'Recommended: Cargo 3-Wheeler (Up to 150 kg)',
+                      vehicleId: 'three_wheeler',
+                    ),
+                    _buildHelpOption(
+                      title: 'Heavy furniture, Fridge, washing machine',
+                      subtitle: 'Recommended: Mini Truck (4-Wheeler) (Up to 600 kg)',
+                      vehicleId: 'ace',
+                    ),
+                    _buildHelpOption(
+                      title: 'Bulk commercial stock or House shifting',
+                      subtitle: 'Recommended: LCV (4-Wheeler) (Up to 2,000 kg)',
+                      vehicleId: 'truck',
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
-              const SizedBox(height: 4),
-              const Text(
-                'Select what you want to deliver to get a recommendation:',
-                style: TextStyle(fontSize: 12, color: VayaTheme.slate),
-              ),
-              const SizedBox(height: 16),
-              _buildHelpOption(
-                title: 'Documents, Keys, Food or Small Box',
-                subtitle: 'Recommended: Bike (Up to 20 kg)',
-                vehicleId: 'bike',
-              ),
-              _buildHelpOption(
-                title: 'Appliances, Groceries, or Multiple Cartons',
-                subtitle: 'Recommended: Cargo 3-Wheeler (Up to 150 kg)',
-                vehicleId: 'three_wheeler',
-              ),
-              _buildHelpOption(
-                title: 'Heavy furniture, Fridge, washing machine',
-                subtitle: 'Recommended: Mini Truck (4-Wheeler) (Up to 600 kg)',
-                vehicleId: 'ace',
-              ),
-              _buildHelpOption(
-                title: 'Bulk commercial stock or House shifting',
-                subtitle: 'Recommended: LCV (4-Wheeler) (Up to 2,000 kg)',
-                vehicleId: 'truck',
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -2940,9 +3201,10 @@ class TrackingScreen extends StatefulWidget {
   State<TrackingScreen> createState() => _TrackingScreenState();
 }
 
-class _TrackingScreenState extends State<TrackingScreen> {
+class _TrackingScreenState extends State<TrackingScreen> with SingleTickerProviderStateMixin {
   IOWebSocketChannel? _channel;
   GoogleMapController? _mapController;
+  late AnimationController _pulseController;
 
   String _status = "searching"; // searching, driver_assigned, arrived_pickup, loading, in_transit, arrived_drop, completed
   String _driverName = "Searching nearby drivers...";
@@ -2951,6 +3213,10 @@ class _TrackingScreenState extends State<TrackingScreen> {
   String _otp = "";
   double _estimatedCost = 0.0;
   String _vehicleType = "bike";
+  bool _isCancelling = false;
+  DateTime _searchStartTime = DateTime.now();
+  Timer? _searchTimer;
+  String _elapsedText = '0:00';
 
   LatLng _pickupPos = const LatLng(20.2961, 85.8245);
   LatLng _dropPos = const LatLng(20.3150, 85.8178);
@@ -2960,6 +3226,19 @@ class _TrackingScreenState extends State<TrackingScreen> {
   @override
   void initState() {
     super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+    _searchStartTime = DateTime.now();
+    _searchTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _status == 'searching') {
+        final elapsed = DateTime.now().difference(_searchStartTime);
+        setState(() {
+          _elapsedText = '${elapsed.inMinutes}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')}';
+        });
+      }
+    });
     _fetchBookingDetails();
     _connectWebSocket();
   }
@@ -2993,6 +3272,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
             if (booking['driver_id'] != null) {
               _driverName = booking['driver_name'] ?? "Driver Partner";
               _driverPlate = booking['driver_plate'] ?? "OD-02-X-999";
+              _driverPhone = booking['driver_phone'] ?? "+919876543210";
             }
             _updateMapMarkers();
           });
@@ -3033,6 +3313,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
           setState(() {
             _driverPos = LatLng(lat, lng);
             _updateMapMarkers();
+            _mapController?.animateCamera(CameraUpdate.newLatLng(_driverPos!));
           });
         }
       });
@@ -3065,18 +3346,77 @@ class _TrackingScreenState extends State<TrackingScreen> {
     }
   }
 
+  Future<void> _cancelBooking() async {
+    final l = LocalizedStrings.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.cancelConfirmTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Text(l.cancelConfirmMsg, style: const TextStyle(fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l.close),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l.cancelBooking, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isCancelling = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final token = await user.getIdToken();
+        await http.delete(
+          Uri.parse('$apiBaseUrl/api/booking/${widget.bookingId}'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      }
+    } catch (e) {
+      debugPrint('Cancel booking error: $e');
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Booking cancelled successfully.')),
+      );
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+        (route) => false,
+      );
+    }
+  }
+
   @override
   void dispose() {
+    _pulseController.dispose();
+    _searchTimer?.cancel();
     _channel?.sink.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = LocalizedStrings.of(context);
+    final isSearching = _status == 'searching';
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Booking #${widget.bookingId.substring(0, 8).toUpperCase()}'),
         actions: [
+          if (isSearching || _status == 'driver_assigned')
+            IconButton(
+              icon: const Icon(Icons.cancel_outlined, color: Colors.red),
+              tooltip: l.cancelBooking,
+              onPressed: _isCancelling ? null : _cancelBooking,
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: () {
@@ -3096,116 +3436,225 @@ class _TrackingScreenState extends State<TrackingScreen> {
             onMapCreated: (c) => _mapController = c,
           ),
 
-          // Layered Fulfilment Status Card
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 24,
-            child: Card(
-              color: Colors.white,
-              elevation: 6,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Status Badge Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: VayaTheme.saffron.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _status.toUpperCase().replaceAll('_', ' '),
-                            style: const TextStyle(
-                              color: VayaTheme.saffron,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          'Est. Fare: ₹${_estimatedCost.toStringAsFixed(0)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Driver Card Section
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const CircleAvatar(
-                        backgroundColor: VayaTheme.fog,
-                        child: Icon(Icons.person, color: VayaTheme.inkBlack),
+          // Searching state overlay
+          if (isSearching)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 24,
+              child: Card(
+                color: Colors.white,
+                elevation: 8,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Pulsing search animation
+                      AnimatedBuilder(
+                        animation: _pulseController,
+                        builder: (context, child) {
+                          final scale = 1.0 + (_pulseController.value * 0.3);
+                          final opacity = 1.0 - _pulseController.value;
+                          return Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Transform.scale(
+                                scale: scale,
+                                child: Container(
+                                  width: 60,
+                                  height: 60,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: VayaTheme.saffron.withValues(alpha: opacity * 0.3),
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                width: 50,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: VayaTheme.saffron.withValues(alpha: 0.15),
+                                ),
+                                child: const Icon(Icons.local_shipping, color: VayaTheme.saffron, size: 28),
+                              ),
+                            ],
+                          );
+                        },
                       ),
-                      title: Text(_driverName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                      subtitle: Text('Plate: $_driverPlate • Class: ${_vehicleType.toUpperCase()}', style: const TextStyle(fontSize: 11)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.call, color: VayaTheme.routeGreen),
-                            onPressed: () {},
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.chat_bubble_outline, color: VayaTheme.liveBlue),
-                            onPressed: () {},
-                          ),
-                        ],
+                      const SizedBox(height: 16),
+                      Text(
+                        l.searchingDrivers,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack),
                       ),
-                    ),
-
-                    const Divider(height: 16),
-
-                    // Security Pickup OTP Box
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('PICKUP VERIFICATION OTP', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
-                            Text('Share with driver upon arrival', style: TextStyle(fontSize: 10, color: VayaTheme.slate)),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: VayaTheme.routeGreen.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: VayaTheme.routeGreen, width: 1.5),
-                          ),
-                          child: Text(
-                            _otp.isEmpty ? '849201' : _otp,
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: VayaTheme.routeGreen, letterSpacing: 2),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Elapsed: $_elapsedText',
+                        style: const TextStyle(fontSize: 12, color: VayaTheme.slate),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Est. Fare: ₹${_estimatedCost.toStringAsFixed(0)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.saffron),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _isCancelling ? null : _cancelBooking,
+                          icon: _isCancelling
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.close, size: 18),
+                          label: Text(_isCancelling ? 'Cancelling...' : l.cancelBooking),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                         ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Contextual Action Buttons
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Live tracking link copied to clipboard!')),
-                        );
-                      },
-                      icon: const Icon(Icons.share, size: 18),
-                      label: const Text('Share Live Tracking Link'),
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
+
+          // Driver assigned / in-transit status card
+          if (!isSearching)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 24,
+              child: Card(
+                color: Colors.white,
+                elevation: 6,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Status Badge Header
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: VayaTheme.saffron.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _status.toUpperCase().replaceAll('_', ' '),
+                              style: const TextStyle(
+                                color: VayaTheme.saffron,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${l.estimatedFare}: ₹${_estimatedCost.toStringAsFixed(0)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Driver Card Section
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const CircleAvatar(
+                          backgroundColor: VayaTheme.fog,
+                          child: Icon(Icons.person, color: VayaTheme.inkBlack),
+                        ),
+                        title: Text(_driverName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                        subtitle: Text('Plate: $_driverPlate • Class: ${_vehicleType.toUpperCase()}', style: const TextStyle(fontSize: 11)),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.call, color: VayaTheme.routeGreen),
+                              onPressed: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Calling driver at ${_driverPhone.isEmpty ? "+919876543210" : _driverPhone}...')),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.chat_bubble_outline, color: VayaTheme.liveBlue),
+                              onPressed: () {},
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const Divider(height: 16),
+
+                      // Security Pickup OTP Box
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(l.pickupVerificationOtp, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: VayaTheme.slate)),
+                              Text(l.shareWithDriver, style: const TextStyle(fontSize: 10, color: VayaTheme.slate)),
+                            ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: VayaTheme.routeGreen.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: VayaTheme.routeGreen, width: 1.5),
+                            ),
+                            child: Text(
+                              _otp.isEmpty ? '849201' : _otp,
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: VayaTheme.routeGreen, letterSpacing: 2),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Action buttons row
+                      Row(
+                        children: [
+                          if (_status == 'driver_assigned')
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _isCancelling ? null : _cancelBooking,
+                                icon: const Icon(Icons.close, size: 16),
+                                label: Text(l.cancelBooking, style: const TextStyle(fontSize: 12)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: const BorderSide(color: Colors.red),
+                                ),
+                              ),
+                            ),
+                          if (_status == 'driver_assigned') const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Live tracking link copied to clipboard!')),
+                                );
+                              },
+                              icon: const Icon(Icons.share, size: 16),
+                              label: Text(l.shareTracking, style: const TextStyle(fontSize: 12)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -4270,15 +4719,59 @@ class _AccountScreenState extends State<AccountScreen> {
                   const Divider(height: 1),
                   ListTile(
                     leading: const SizedBox(width: 24, child: Icon(Icons.language, color: VayaTheme.slate)),
-                    title: const Text('App language', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    subtitle: Text('Current language: $_appLanguage', style: const TextStyle(fontSize: 11)),
+                    title: Text(LocalizedStrings.of(context).appLanguage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: Text('Current: $_appLanguage', style: const TextStyle(fontSize: 11)),
                     trailing: const Icon(Icons.chevron_right, size: 18),
                     onTap: () {
-                      setState(() {
-                        _appLanguage = _appLanguage == 'English' ? 'Odia' : 'English';
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Language switched to $_appLanguage')),
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => SimpleDialog(
+                          title: Text(LocalizedStrings.of(context).chooseLanguage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          children: [
+                            SimpleDialogOption(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                setState(() => _appLanguage = 'English');
+                                context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('en'));
+                              },
+                              child: Row(
+                                children: [
+                                  if (_appLanguage == 'English') const Icon(Icons.check_circle, color: VayaTheme.saffron, size: 20) else const Icon(Icons.radio_button_unchecked, size: 20, color: VayaTheme.slate),
+                                  const SizedBox(width: 12),
+                                  const Text('English', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                ],
+                              ),
+                            ),
+                            SimpleDialogOption(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                setState(() => _appLanguage = 'ଓଡ଼ିଆ (Odia)');
+                                context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('or'));
+                              },
+                              child: Row(
+                                children: [
+                                  if (_appLanguage.contains('Odia')) const Icon(Icons.check_circle, color: VayaTheme.saffron, size: 20) else const Icon(Icons.radio_button_unchecked, size: 20, color: VayaTheme.slate),
+                                  const SizedBox(width: 12),
+                                  const Text('ଓଡ଼ିଆ (Odia)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                ],
+                              ),
+                            ),
+                            SimpleDialogOption(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                setState(() => _appLanguage = 'हिन्दी (Hindi)');
+                                context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('hi'));
+                              },
+                              child: Row(
+                                children: [
+                                  if (_appLanguage.contains('Hindi')) const Icon(Icons.check_circle, color: VayaTheme.saffron, size: 20) else const Icon(Icons.radio_button_unchecked, size: 20, color: VayaTheme.slate),
+                                  const SizedBox(width: 12),
+                                  const Text('हिन्दी (Hindi)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     },
                   ),
