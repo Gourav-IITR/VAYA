@@ -15,8 +15,15 @@ import {
 const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:5001' : 'https://vaya-backend-275777907648.us-central1.run.app';
 const wsBaseUrl = import.meta.env.DEV ? 'ws://localhost:5001' : 'wss://vaya-backend-275777907648.us-central1.run.app';
 
+const defaultPricing = [
+  { vehicle_type: 'bike', base_price: 40, base_distance: 2, per_km_price: 10, description: 'Quick deliveries up to 20 kg' },
+  { vehicle_type: 'three_wheeler', base_price: 120, base_distance: 3, per_km_price: 18, description: 'Medium cargo up to 150 kg' },
+  { vehicle_type: 'ace', base_price: 250, base_distance: 5, per_km_price: 25, description: 'Heavy cargo up to 600 kg' },
+  { vehicle_type: 'truck', base_price: 500, base_distance: 5, per_km_price: 35, description: 'Very heavy cargo up to 2,000 kg' },
+];
+
 export default function AdminDashboard({ adminUser }) {
-  const [activeTab, setActiveTab] = useState('orders'); // orders, drivers, audit
+  const [activeTab, setActiveTab] = useState('orders'); // orders, drivers, audit, pricing
   const [metrics, setMetrics] = useState({
     totalBookings: 0,
     activeDeliveries: 0,
@@ -28,6 +35,7 @@ export default function AdminDashboard({ adminUser }) {
   const [bookings, setBookings] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [pricingConfig, setPricingConfig] = useState(defaultPricing);
   const [isLoading, setIsLoading] = useState(true);
 
   // Live clock
@@ -67,18 +75,44 @@ export default function AdminDashboard({ adminUser }) {
         fetchJson(`${apiBaseUrl}/api/admin/bookings`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/drivers`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/audit-log`, { headers }),
-        fetchJson(`${apiBaseUrl}/api/pricing-config`)
+        fetchJson(`${apiBaseUrl}/api/booking/pricing-config`)
       ]);
 
       if (metricsData) setMetrics(metricsData.metrics || {});
       if (bookingsData) setBookings(bookingsData.bookings || []);
       if (driversData) setDrivers(driversData.drivers || []);
       if (auditData) setAuditLogs(auditData.logs || []);
-      if (pricingData) setPricingConfig(pricingData.pricing || []);
+      if (pricingData && pricingData.pricing && pricingData.pricing.length > 0) {
+        setPricingConfig(pricingData.pricing);
+      }
     } catch (e) {
       console.error('Failed to load dashboard data:', e);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleUpdatePricing = async (e) => {
+    e.preventDefault();
+    if (!window.confirm('Save these live delivery rates?')) return;
+    try {
+      const token = await adminUser.getIdToken();
+      const res = await fetch(`${apiBaseUrl}/api/admin/pricing-config`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ pricing: pricingConfig })
+      });
+      if (res.ok) {
+        alert('Pricing rates updated live successfully!');
+        fetchData();
+      } else {
+        alert('Failed to update pricing.');
+      }
+    } catch (e) {
+      console.error('Error updating pricing:', e);
     }
   };
 
@@ -253,6 +287,14 @@ export default function AdminDashboard({ adminUser }) {
               <FileText size={15} />
               <span>Audit Logs</span>
             </button>
+            <button 
+              onClick={() => setActiveTab('pricing')}
+              className={`btn ${activeTab === 'pricing' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ borderRadius: '8px 8px 0 0', borderBottom: 'none', padding: '10px 18px', fontSize: '13px' }}
+            >
+              <DollarSign size={15} />
+              <span>Pricing Manager</span>
+            </button>
           </div>
 
           {/* Table Container */}
@@ -393,6 +435,75 @@ export default function AdminDashboard({ adminUser }) {
                       )}
                     </tbody>
                   </table>
+                )}
+                {/* Pricing Manager Tab */}
+                {activeTab === 'pricing' && (
+                  <form onSubmit={handleUpdatePricing} style={{ maxWidth: '600px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: 'var(--text-heading)', marginBottom: '4px' }}>Live Delivery Rates Management</h3>
+                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Modify the base rates, distance limits, and per-km pricing for all 4 vehicle classes. Changes are applied instantly to customer booking screens.</p>
+                    </div>
+
+                    {pricingConfig.map((item, index) => (
+                      <div key={item.vehicle_type} style={{ padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#fafafa', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 'bold', textTransform: 'capitalize', color: 'var(--primary)', fontSize: '13px' }}>
+                            {item.vehicle_type === 'bike' ? 'Bike' : item.vehicle_type === 'three_wheeler' ? 'Cargo 3-wheeler' : item.vehicle_type === 'ace' ? 'Mini Truck (4-wheeler)' : 'Light Commercial Vehicle (4-wheeler)'}
+                          </span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>({item.vehicle_type})</span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Base Price (₹)</label>
+                            <input 
+                              type="number" 
+                              value={item.base_price}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, base_price: val } : p));
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Base Distance (km)</label>
+                            <input 
+                              type="number" 
+                              step="0.1"
+                              value={item.base_distance}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, base_distance: val } : p));
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Per KM Price (₹)</label>
+                            <input 
+                              type="number" 
+                              value={item.per_km_price}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, per_km_price: val } : p));
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 20px', fontSize: '13px' }}>
+                      Save Live Rates
+                    </button>
+                  </form>
                 )}
               </>
             )}

@@ -15,8 +15,15 @@ import {
 const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:5001' : 'https://vaya-backend-275777907648.us-central1.run.app';
 const wsBaseUrl = import.meta.env.DEV ? 'ws://localhost:5001' : 'wss://vaya-backend-275777907648.us-central1.run.app';
 
+const defaultPricing = [
+  { vehicle_type: 'bike', base_price: 40, base_distance: 2, per_km_price: 10, description: 'Quick deliveries up to 20 kg' },
+  { vehicle_type: 'three_wheeler', base_price: 120, base_distance: 3, per_km_price: 18, description: 'Medium cargo up to 150 kg' },
+  { vehicle_type: 'ace', base_price: 250, base_distance: 5, per_km_price: 25, description: 'Heavy cargo up to 600 kg' },
+  { vehicle_type: 'truck', base_price: 500, base_distance: 5, per_km_price: 35, description: 'Very heavy cargo up to 2,000 kg' },
+];
+
 export default function AdminDashboard({ adminUser }) {
-  const [activeTab, setActiveTab] = useState('orders'); // orders, drivers, audit
+  const [activeTab, setActiveTab] = useState('orders'); // orders, drivers, audit, pricing
   const [metrics, setMetrics] = useState({
     totalBookings: 0,
     activeDeliveries: 0,
@@ -28,7 +35,7 @@ export default function AdminDashboard({ adminUser }) {
   const [bookings, setBookings] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
-  const [pricingConfig, setPricingConfig] = useState([]);
+  const [pricingConfig, setPricingConfig] = useState(defaultPricing);
   const [isLoading, setIsLoading] = useState(true);
 
   // Live clock
@@ -68,14 +75,16 @@ export default function AdminDashboard({ adminUser }) {
         fetchJson(`${apiBaseUrl}/api/admin/bookings`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/drivers`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/audit-log`, { headers }),
-        fetchJson(`${apiBaseUrl}/api/pricing-config`)
+        fetchJson(`${apiBaseUrl}/api/booking/pricing-config`)
       ]);
 
       if (metricsData) setMetrics(metricsData.metrics || {});
       if (bookingsData) setBookings(bookingsData.bookings || []);
       if (driversData) setDrivers(driversData.drivers || []);
       if (auditData) setAuditLogs(auditData.logs || []);
-      if (pricingData) setPricingConfig(pricingData.pricing || []);
+      if (pricingData && pricingData.pricing && pricingData.pricing.length > 0) {
+        setPricingConfig(pricingData.pricing);
+      }
     } catch (e) {
       console.error('Failed to load dashboard data:', e);
     } finally {
