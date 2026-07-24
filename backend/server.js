@@ -15,6 +15,7 @@ import { registerClient, unregisterClient, broadcast } from './src/services/webs
 import customerRouter from './src/routes/customer.routes.js';
 import driverRouter from './src/routes/driver.routes.js';
 import bookingRouter from './src/routes/booking.routes.js';
+import ledgerRouter from './src/routes/ledger.routes.js';
 import adminRouter from './src/routes/admin.routes.js';
 import healthRouter from './src/routes/health.routes.js';
 
@@ -53,8 +54,9 @@ app.use('/api/', limiter);
 app.use('/api/customer', customerRouter);
 app.use('/api/driver', driverRouter);
 app.use('/api/booking', bookingRouter);
+app.use('/api/ledger', ledgerRouter);
 app.use('/api/admin', adminRouter);
-app.use('/api', healthRouter);
+app.use('/api/health', healthRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

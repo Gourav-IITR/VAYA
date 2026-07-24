@@ -82,3 +82,30 @@ VALUES
 ('ace', 250.00, 5.0, 25.00, 'Heavy cargo up to 600 kg'),
 ('truck', 500.00, 5.0, 35.00, 'Very heavy cargo up to 2,000 kg')
 ON CONFLICT (vehicle_type) DO NOTHING;
+
+-- Alter drivers table for Wallet & Dues Ledger
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS wallet_balance DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS outstanding_dues DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS max_negative_limit DECIMAL(10, 2) DEFAULT 500.00;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS account_status VARCHAR(30) DEFAULT 'active'; -- 'active', 'cash_restricted', 'trip_paused'
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS dues_due_date TIMESTAMP WITH TIME ZONE;
+
+-- Alter bookings table for Payment Type & Settlement Tracking
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_type VARCHAR(20) DEFAULT 'cash'; -- 'online', 'cash', 'direct_upi'
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS commission_amount DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver_net_earnings DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_settled BOOLEAN DEFAULT FALSE;
+
+-- Partner Ledgers Table (Unified Financial Ledger)
+CREATE TABLE IF NOT EXISTS partner_ledgers (
+    id SERIAL PRIMARY KEY,
+    driver_id VARCHAR(128) REFERENCES drivers(id) ON DELETE CASCADE,
+    booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
+    entry_type VARCHAR(40) NOT NULL, -- 'trip_earning', 'platform_commission', 'dues_offset', 'direct_repayment', 'incentive', 'reimbursement', 'adjustment'
+    amount DECIMAL(10, 2) NOT NULL, -- Positive for driver credit, negative for driver debit
+    balance_after DECIMAL(10, 2) NOT NULL,
+    description TEXT NOT NULL,
+    is_disputed BOOLEAN DEFAULT FALSE,
+    dispute_reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

@@ -4,6 +4,7 @@ import { query, pool } from '../config/db.js';
 import { verifyToken } from '../middleware/auth.js';
 import { sendNotificationToUser, sendNotificationToDrivers } from '../services/notification.service.js';
 import { broadcast } from '../services/websocket.service.js';
+import { evaluateDriverAccountStatus } from './ledger.routes.js';
 
 const router = express.Router();
 
@@ -337,13 +338,74 @@ router.post(
         if (booking.status !== 'dropping_off' && booking.status !== 'arrived_dropoff') {
           return res.status(400).json({ error: 'Cannot complete booking before picking up cargo.' });
         }
-        const updateRes = await client.query("UPDATE bookings SET status = 'completed' WHERE id = $1 RETURNING *", [bookingId]);
+
+        const fare = parseFloat(booking.estimated_cost || 0);
+        const commission = fare * 0.10; // 10% platform commission
+        const paymentType = booking.payment_type || 'cash';
+        const driverId = booking.driver_id;
+
+        // Fetch driver wallet & dues details with row lock
+        const driverRes = await client.query('SELECT wallet_balance, outstanding_dues FROM drivers WHERE id = $1 FOR UPDATE', [driverId]);
+        let currentWallet = parseFloat(driverRes.rows[0]?.wallet_balance || 0);
+        let currentDues = parseFloat(driverRes.rows[0]?.outstanding_dues || 0);
+
+        let driverNetEarnings = 0;
+
+        if (paymentType === 'online') {
+          // Online Prepaid Payment: Platform collects fare
+          driverNetEarnings = fare - commission;
+
+          // Record Trip Earning Entry
+          await client.query(
+            `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+             VALUES ($1, $2, 'trip_earning', $3, $4, $5)`,
+            [driverId, bookingId, driverNetEarnings, currentWallet + driverNetEarnings, `Net Trip Earning (Fare ₹${fare} - Commission ₹${commission.toFixed(2)})`]
+          );
+
+          // Automated Dues Offset: If driver owes outstanding dues, offset against online earnings
+          let duesOffset = 0;
+          if (currentDues > 0) {
+            duesOffset = Math.min(currentDues, driverNetEarnings);
+            currentDues -= duesOffset;
+            driverNetEarnings -= duesOffset;
+
+            await client.query(
+              `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+               VALUES ($1, $2, 'dues_offset', $3, $4, $5)`,
+              [driverId, bookingId, -duesOffset, -currentDues, `Auto Dues Offset against Online Trip Earnings`]
+            );
+          }
+
+          currentWallet += driverNetEarnings;
+        } else {
+          // Cash / Direct-UPI Payment: Driver collects full fare directly
+          driverNetEarnings = fare;
+          currentDues += commission;
+
+          // Record Commission Debit Entry
+          await client.query(
+            `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+             VALUES ($1, $2, 'platform_commission', $3, $4, $5)`,
+            [driverId, bookingId, -commission, -currentDues, `Platform Commission Owed (Cash Fare ₹${fare})`]
+          );
+        }
+
+        // Update driver wallet & dues
+        await client.query(
+          `UPDATE drivers SET wallet_balance = $1, outstanding_dues = $2, status = 'online' WHERE id = $3`,
+          [currentWallet, currentDues, driverId]
+        );
+
+        // Update booking settlement state
+        const updateRes = await client.query(
+          `UPDATE bookings SET status = 'completed', commission_amount = $1, driver_net_earnings = $2, is_settled = TRUE WHERE id = $3 RETURNING *`,
+          [commission, driverNetEarnings, bookingId]
+        );
         updatedBooking = updateRes.rows[0];
 
-        await client.query("UPDATE drivers SET status = 'online' WHERE id = $1", [booking.driver_id]);
         await client.query(
           'INSERT INTO booking_events (booking_id, event_type, description) VALUES ($1, $2, $3)',
-          [bookingId, 'completed', 'Delivery completed successfully by driver.']
+          [bookingId, 'completed', `Delivery completed. Ledger settled (${paymentType.toUpperCase()} payment mode).`]
         );
       } else if (status === 'cancelled') {
         if (booking.status === 'completed' || booking.status === 'expired') {
@@ -371,6 +433,10 @@ router.post(
       }
 
       await client.query('COMMIT');
+
+      if (status === 'completed' && booking.driver_id) {
+        await evaluateDriverAccountStatus(booking.driver_id);
+      }
 
       // Broadcast booking status change
       broadcast({ type: 'booking_status', bookingId, status, booking: updatedBooking });

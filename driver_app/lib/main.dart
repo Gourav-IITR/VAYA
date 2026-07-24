@@ -1542,7 +1542,7 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> {
   }
 }
 
-/// 8. Driver Earnings & Payouts Screen (Earnings Tab)
+/// 8. Driver Earnings, Wallet & Dues Ledger Screen (Earnings Tab)
 class DriverEarningsScreen extends StatefulWidget {
   final Map<String, dynamic> driverData;
   const DriverEarningsScreen({super.key, required this.driverData});
@@ -1553,39 +1553,41 @@ class DriverEarningsScreen extends StatefulWidget {
 
 class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
   bool _isLoading = true;
-  double _totalGross = 0.0;
-  int _completedCount = 0;
-  double _todayGross = 0.0;
-  double _platformFee = 0.0;
-  double _netEarnings = 0.0;
+  double _walletBalance = 0.0;
+  double _outstandingDues = 0.0;
+  double _maxLimit = 500.0;
+  String _accountStatus = 'active';
+  String? _dueDueDate;
+  List<dynamic> _ledgerEntries = [];
 
   @override
   void initState() {
     super.initState();
-    _fetchEarningsStats();
+    _fetchLedgerData();
   }
 
-  Future<void> _fetchEarningsStats() async {
+  Future<void> _fetchLedgerData() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
       final token = await user.getIdToken();
 
       final res = await http.get(
-        Uri.parse('$apiBaseUrl/api/driver/earnings-stats'),
+        Uri.parse('$apiBaseUrl/api/ledger/driver'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted && data['success'] == true) {
-          final stats = data['stats'];
+          final summary = data['summary'];
           setState(() {
-            _totalGross = (stats['totalGross'] as num).toDouble();
-            _completedCount = (stats['completedCount'] as num).toInt();
-            _todayGross = (stats['todayGross'] as num).toDouble();
-            _platformFee = (stats['platformFee'] as num).toDouble();
-            _netEarnings = (stats['netEarnings'] as num).toDouble();
+            _walletBalance = (summary['walletBalance'] as num).toDouble();
+            _outstandingDues = (summary['outstandingDues'] as num).toDouble();
+            _maxLimit = (summary['maxNegativeLimit'] as num).toDouble();
+            _accountStatus = summary['accountStatus'] ?? 'active';
+            _dueDueDate = summary['duesDueDate'];
+            _ledgerEntries = data['entries'] ?? [];
             _isLoading = false;
           });
         }
@@ -1593,82 +1595,461 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      debugPrint("Error fetching earnings stats: $e");
+      debugPrint("Error fetching ledger data: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Earnings & Payouts'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() => _isLoading = true);
-              _fetchEarningsStats();
-            },
-          ),
-        ],
+  void _showRepayDuesModal() {
+    final TextEditingController amountController = TextEditingController(
+      text: _outstandingDues > 0 ? _outstandingDues.toStringAsFixed(0) : '100',
+    );
+    bool isSubmitting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1A1A17),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: VayaDriverTheme.saffron))
-          : Padding(
-              padding: const EdgeInsets.all(20.0),
+      builder: (BuildContext ctx) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter modalSetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 24,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Card(
-                    color: const Color(0xFF1A1A17),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('TOTAL NET EARNINGS', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 11, letterSpacing: 1.0)),
-                          const SizedBox(height: 8),
-                          Text('₹${_netEarnings.toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.saffron, fontSize: 32, fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('Total Trips Completed: $_completedCount', style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 12)),
-                              Text('Today: ₹${_todayGross.toStringAsFixed(0)}', style: const TextStyle(color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
-                            ],
-                          ),
-                        ],
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Repay Dues via UPI',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream),
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: VayaDriverTheme.slate),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Current Outstanding Dues: ₹${_outstandingDues.toStringAsFixed(2)}',
+                    style: const TextStyle(color: VayaDriverTheme.saffron, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontSize: 18),
+                    decoration: const InputDecoration(
+                      labelText: 'Repayment Amount (₹)',
+                      prefixText: '₹ ',
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text('EARNINGS BREAKDOWN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaDriverTheme.slate)),
                   const SizedBox(height: 12),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.local_taxi, color: VayaDriverTheme.saffron),
-                      title: const Text('Trip Gross Fares'),
-                      trailing: Text('₹${_totalGross.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    ),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Full Dues'),
+                        selected: amountController.text == _outstandingDues.toStringAsFixed(0),
+                        onSelected: (val) {
+                          modalSetState(() {
+                            amountController.text = _outstandingDues.toStringAsFixed(0);
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('₹200'),
+                        selected: amountController.text == '200',
+                        onSelected: (val) {
+                          modalSetState(() {
+                            amountController.text = '200';
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('₹500'),
+                        selected: amountController.text == '500',
+                        onSelected: (val) {
+                          modalSetState(() {
+                            amountController.text = '500';
+                          });
+                        },
+                      ),
+                    ],
                   ),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                      title: const Text('Platform Fee (10%)'),
-                      trailing: Text('-₹${_platformFee.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-                    ),
-                  ),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.account_balance_wallet, color: VayaDriverTheme.routeGreen),
-                      title: const Text('Net Balance Credited'),
-                      trailing: Text('₹${_netEarnings.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen)),
-                    ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            final payAmt = double.tryParse(amountController.text) ?? 0;
+                            if (payAmt <= 0) return;
+
+                            modalSetState(() => isSubmitting = true);
+
+                            try {
+                              final user = FirebaseAuth.instance.currentUser;
+                              if (user == null) return;
+                              final token = await user.getIdToken();
+
+                              final res = await http.post(
+                                Uri.parse('$apiBaseUrl/api/ledger/repay-dues'),
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': 'Bearer $token'
+                                },
+                                body: json.encode({'amount': payAmt}),
+                              );
+
+                              if (res.statusCode == 200) {
+                                Navigator.pop(context);
+                                _fetchLedgerData();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Dues repayment recorded successfully!')),
+                                );
+                              } else {
+                                modalSetState(() => isSubmitting = false);
+                              }
+                            } catch (e) {
+                              modalSetState(() => isSubmitting = false);
+                            }
+                          },
+                    child: isSubmitting
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white))
+                        : const Text('PAY VIA UPI / NET BANKING'),
                   ),
                 ],
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDisputeModal(Map<String, dynamic> entry) {
+    final TextEditingController reasonController = TextEditingController();
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1A17),
+          title: const Text('Dispute Charge Entry', style: TextStyle(color: VayaDriverTheme.signalCream)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Entry: ${entry['description']} (₹${entry['amount']})',
+                style: const TextStyle(fontSize: 12, color: VayaDriverTheme.signalCream),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                maxLines: 3,
+                style: const TextStyle(color: VayaDriverTheme.signalCream),
+                decoration: const InputDecoration(
+                  labelText: 'State reason for disputing this deduction',
+                  hintText: 'e.g. Wrong commission calculated on cancelled trip',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: VayaDriverTheme.slate)),
             ),
+            ElevatedButton(
+              onPressed: () async {
+                if (reasonController.text.trim().isEmpty) return;
+                try {
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) return;
+                  final token = await user.getIdToken();
+
+                  final res = await http.post(
+                    Uri.parse('$apiBaseUrl/api/ledger/dispute-entry'),
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': 'Bearer $token'
+                    },
+                    body: json.encode({
+                      'ledgerId': entry['id'],
+                      'reason': reasonController.text.trim()
+                    }),
+                  );
+
+                  if (res.statusCode == 200) {
+                    Navigator.pop(ctx);
+                    _fetchLedgerData();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Dispute submitted for admin review.')),
+                    );
+                  }
+                } catch (e) {
+                  debugPrint("Dispute submission error: $e");
+                }
+              },
+              child: const Text('Submit Dispute'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Color statusColor = VayaDriverTheme.routeGreen;
+    String statusLabel = '🟢 FULL ACCESS (ACTIVE)';
+    if (_accountStatus == 'cash_restricted') {
+      statusColor = Colors.orange;
+      statusLabel = '⚠️ CASH TRIPS RESTRICTED';
+    } else if (_accountStatus == 'trip_paused') {
+      statusColor = Colors.red;
+      statusLabel = '⛔ ACCOUNT PAUSED - PAY DUES';
+    }
+
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Partner Wallet & Ledger'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                setState(() => _isLoading = true);
+                _fetchLedgerData();
+              },
+            ),
+          ],
+          bottom: const TabBar(
+            labelColor: VayaDriverTheme.saffron,
+            indicatorColor: VayaDriverTheme.saffron,
+            tabs: [
+              Tab(text: 'Summary'),
+              Tab(text: 'Ledger Timeline'),
+            ],
+          ),
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: VayaDriverTheme.saffron))
+            : TabBarView(
+                children: [
+                  // Tab 1: Wallet & Dues Summary
+                  SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Status Banner
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: statusColor.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: statusColor, width: 1.5),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.shield_outlined, color: statusColor),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  statusLabel,
+                                  style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Balance Card
+                        Card(
+                          color: const Color(0xFF1A1A17),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('NET WALLET BALANCE', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 10, letterSpacing: 1.0)),
+                                        const SizedBox(height: 4),
+                                        Text('₹${_walletBalance.toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.saffron, fontSize: 28, fontWeight: FontWeight.w800)),
+                                      ],
+                                    ),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        const Text('OUTSTANDING DUES', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 10, letterSpacing: 1.0)),
+                                        const SizedBox(height: 4),
+                                        Text('₹${_outstandingDues.toStringAsFixed(2)}', style: const TextStyle(color: Colors.redAccent, fontSize: 24, fontWeight: FontWeight.w800)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                // Limit progress bar
+                                LinearProgressIndicator(
+                                  value: (_outstandingDues / _maxLimit).clamp(0.0, 1.0),
+                                  backgroundColor: VayaDriverTheme.slate,
+                                  color: _outstandingDues > _maxLimit ? Colors.red : VayaDriverTheme.saffron,
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Limit: ₹${_maxLimit.toStringAsFixed(0)}', style: const TextStyle(fontSize: 11, color: VayaDriverTheme.slate)),
+                                    if (_dueDueDate != null)
+                                      Text('Due Date: ${DateTime.parse(_dueDueDate!).toLocal().toString().substring(0, 10)}', style: const TextStyle(fontSize: 11, color: Colors.orange)),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: VayaDriverTheme.routeGreen,
+                                    minimumSize: const Size(double.infinity, 48),
+                                  ),
+                                  icon: const Icon(Icons.qr_code_2, color: Colors.white),
+                                  label: const Text('CLEAR DUES VIA UPI'),
+                                  onPressed: _showRepayDuesModal,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text('FINANCIAL RULES & ESCALATION', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0, color: VayaDriverTheme.slate)),
+                        const SizedBox(height: 12),
+                        const Card(
+                          child: ListTile(
+                            leading: Icon(Icons.check_circle_outline, color: VayaDriverTheme.routeGreen),
+                            title: Text('Online Trip Auto-Offset'),
+                            subtitle: Text('Online trip net earnings automatically clear outstanding dues.'),
+                          ),
+                        ),
+                        const Card(
+                          child: ListTile(
+                            leading: Icon(Icons.money_off, color: Colors.orange),
+                            title: Text('Cash Order Limit Threshold'),
+                            subtitle: Text('Dues over ₹500 temporarily restrict accepting cash orders.'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Tab 2: Filterable Ledger Timeline
+                  _ledgerEntries.isEmpty
+                      ? const Center(child: Text('No ledger transactions recorded yet.', style: TextStyle(color: VayaDriverTheme.slate)))
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _ledgerEntries.length,
+                          itemBuilder: (context, index) {
+                            final entry = _ledgerEntries[index];
+                            final double amt = (entry['amount'] as num).toDouble();
+                            final bool isCredit = amt > 0;
+                            final bool isDisputed = entry['is_disputed'] == true;
+
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          isCredit ? Icons.arrow_downward : Icons.arrow_upward,
+                                          color: isCredit ? VayaDriverTheme.routeGreen : Colors.redAccent,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            entry['description'] ?? 'Transaction',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                          ),
+                                        ),
+                                        Text(
+                                          '${isCredit ? "+" : ""}₹${amt.toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 16,
+                                            color: isCredit ? VayaDriverTheme.routeGreen : Colors.redAccent,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          DateTime.parse(entry['created_at']).toLocal().toString().substring(0, 16),
+                                          style: const TextStyle(fontSize: 11, color: VayaDriverTheme.slate),
+                                        ),
+                                        Text(
+                                          'Balance After: ₹${(entry['balance_after'] as num).toStringAsFixed(2)}',
+                                          style: const TextStyle(fontSize: 11, color: VayaDriverTheme.signalCream),
+                                        ),
+                                      ],
+                                    ),
+                                    if (isDisputed) ...[
+                                      const SizedBox(height: 8),
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          '⚠️ Under Review: ${entry['dispute_reason'] ?? ''}',
+                                          style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ] else if (!isCredit && entry['entry_type'] == 'platform_commission') ...[
+                                      const SizedBox(height: 8),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: TextButton.icon(
+                                          style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                                          icon: const Icon(Icons.gavel, size: 14, color: Colors.orangeAccent),
+                                          label: const Text('Dispute Charge', style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+                                          onPressed: () => _showDisputeModal(entry),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ],
+              ),
+      ),
     );
   }
 }
