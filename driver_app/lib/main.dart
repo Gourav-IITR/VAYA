@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -86,6 +87,104 @@ class VayaDriverTheme {
   );
 }
 
+// i18n Strings dictionary for VAYA Driver Partner
+class LocalizedDriverStrings {
+  final Locale locale;
+  LocalizedDriverStrings(this.locale);
+
+  static LocalizedDriverStrings of(BuildContext context) {
+    return LocalizedDriverStrings(Localizations.localeOf(context));
+  }
+
+  String _t(String en, String or, String hi) =>
+      locale.languageCode == 'or' ? or : locale.languageCode == 'hi' ? hi : en;
+
+  // Common
+  String get appTitle => _t('VAYA Driver Partner', 'VAYA ଡ୍ରାଇଭର୍ ପାର୍ଟନର୍', 'VAYA ड्राइवर पार्टनर');
+  String get cancel => _t('Cancel', 'ବାତିଲ୍', 'रद्द करें');
+  String get save => _t('Save', 'ସେଭ୍ କରନ୍ତୁ', 'सहेजें');
+  String get close => _t('Close', 'ବନ୍ଦ କରନ୍ତୁ', 'बंद करें');
+  String get confirm => _t('Confirm', 'ନିଶ୍ଚିତ କରନ୍ତୁ', 'पुष्टि करें');
+  String get loading => _t('Loading...', 'ଲୋଡ୍ ହେଉଛି...', 'लोड हो रहा है...');
+  String get back => _t('Back', 'ପଛକୁ', 'पीछे');
+  String get retry => _t('Retry', 'ପୁନଃଚେଷ୍ଟା', 'पुनः प्रयास करें');
+
+  // Language Selection
+  String get selectLang => _t('Select Language', 'ଭାଷା ଚୟନ କରନ୍ତୁ', 'भाषा चुनें');
+  String get chooseLanguage => _t('Choose Language', 'ଭାଷା ଚୟନ କରନ୍ତୁ', 'भाषा चुनें');
+
+  // Auth / Login
+  String get partnerLogin => _t('Driver Partner Login', 'ଡ୍ରାଇଭର୍ ପାର୍ଟନର୍ ଲଗ୍ ଇନ୍', 'ड्राइवर पार्टनर लॉगिन');
+  String get enterMobile => _t('Enter 10-digit Mobile Number', '୧୦-ଅଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ଦିଅନ୍ତୁ', '10-अंकीय मोबाइल नंबर दर्ज करें');
+  String get sendOtp => _t('Send OTP', 'OTP ପଠାନ୍ତୁ', 'ओटीपी भेजें');
+  String get verifyOtp => _t('Verify OTP', 'OTP ଯାଞ୍ଚ କରନ୍ତୁ', 'ओटीपी सत्यापित करें');
+  String get enterOtpCode => _t('Enter 6-digit OTP code', '୬-ଅଙ୍କ OTP କୋଡ୍ ଦିଅନ୍ତୁ', '6-अंकीय ओटीपी कोड दर्ज करें');
+  String get otpSentTo => _t('OTP sent to +91 ', 'OTP ପଠାଗଲା +91 ', 'ओटीपी भेजा गया +91 ');
+
+  // Onboarding & KYC
+  String get partnerRegistration => _t('Driver Partner Registration', 'ଡ୍ରାଇଭର୍ ପାର୍ଟନର୍ ପଞ୍ଜୀକରଣ', 'ड्राइवर पार्टनर पंजीकरण');
+  String get fullName => _t('Full Name', 'ପୂରା ନାମ', 'पूरा नाम');
+  String get drivingLicense => _t('Driving License Number', 'ଡ୍ରାଇଭିଂ ଲାଇସେନ୍ସ ନମ୍ବର', 'ड्राइविंग लाइसेंस नंबर');
+  String get vehicleType => _t('Vehicle Type', 'ଗାଡ଼ି ଶ୍ରେଣୀ', 'वाहन प्रकार');
+  String get vehiclePlate => _t('Vehicle Plate Number (e.g. OD-02-X-9999)', 'ଗାଡ଼ି ନମ୍ବର ପ୍ଲେଟ୍', 'वाहन प्लेट नंबर');
+  String get submitRegistration => _t('Submit Registration', 'ପଞ୍ଜୀକରଣ ଦାଖଲ କରନ୍ତୁ', 'पंजीकरण जमा करें');
+
+  // Pending Approval
+  String get pendingApprovalTitle => _t('Application Under Review', 'ଆବେଦନ ଯାଞ୍ଚ ଚାଲିଛି', 'आवेदन समीक्षाधीन है');
+  String get pendingApprovalSubtitle => _t('Your partner application is being verified by VAYA operations. You will be notified once approved.', 'ଆପଣଙ୍କ ଆବେଦନ VAYA ଟିମ୍ ଦ୍ୱାରା ଯାଞ୍ଚ ହେଉଛି। ମଞ୍ଜୁର ହେବା ପରେ ଜଣାଯିବ।', 'आपका आवेदन VAYA टीम द्वारा सत्यापित किया जा रहा है। स्वीकृत होने पर आपको सूचित किया जाएगा।');
+  String get contactAdminSupport => _t('Contact Support', 'ସହାୟତା ସମ୍ପର୍କ', 'सहायता संपर्क');
+
+  // Duty Toggle & Home
+  String get youAreOnline => _t('YOU ARE ONLINE', 'ଆପଣ ଅନଲାଇନ୍ ଅଛନ୍ତି', 'आप ऑनलाइन हैं');
+  String get youAreOffline => _t('YOU ARE OFFLINE', 'ଆପଣ ଅଫଲାଇନ୍ ଅଛନ୍ତି', 'आप ऑफलाइन हैं');
+  String get goOnlinePrompt => _t('Go online to receive nearby delivery requests', 'ନିକଟବର୍ତ୍ତୀ ଅର୍ଡର୍ ପାଇବା ପାଇଁ ଅନଲାଇନ୍ ହୁଅନ୍ତୁ', 'आस-पास के ऑर्डर प्राप्त करने के लिए ऑनलाइन जाएं');
+  String get goOfflinePrompt => _t('You are ready to accept rides', 'ଆପଣ ଅର୍ଡର୍ ଗ୍ରହଣ କରିବାକୁ ପ୍ରସ୍ତୁତ ଅଛନ୍ତି', 'आप ऑर्डर स्वीकार करने के लिए तैयार हैं');
+  String get switchOnline => _t('GO ONLINE', 'ଅନଲାଇନ୍ ହୁଅନ୍ତୁ', 'ऑनलाइन जाएं');
+  String get switchOffline => _t('GO OFFLINE', 'ଅଫଲାଇନ୍ ହୁଅନ୍ତୁ', 'ऑफलाइन जाएं');
+
+  // Incoming Booking Request Modal
+  String get newDeliveryRequest => _t('NEW DELIVERY REQUEST', 'ନୂଆ ଡେଲିଭରୀ ଅନୁରୋଧ', 'नया डिलीवरी अनुरोध');
+  String get pickupAddress => _t('PICKUP', 'ପିକଅପ୍', 'पिकअप');
+  String get dropoffAddress => _t('DROP-OFF', 'ଡ୍ରପ୍-ଅଫ୍', 'ड्रॉप-ऑफ');
+  String get estimatedEarnings => _t('Est. Earnings', 'ଅନୁମାନିତ ରୋଜଗାର', 'अनुमानित कमाई');
+  String get acceptOrder => _t('ACCEPT ORDER', 'ଅର୍ଡର ସ୍ୱୀକାର କରନ୍ତୁ', 'ऑर्डर स्वीकार करें');
+  String get rejectOrder => _t('DECLINE', 'ଅଗ୍ରାହ୍ୟ କରନ୍ତୁ', 'अस्वीकार करें');
+
+  // Active Trip Workflow
+  String get navigateToPickup => _t('Navigate to Pickup Location', 'ପିକଅପ୍ ସ୍ଥାନକୁ ଯାଆନ୍ତୁ', 'पिकअप स्थान पर जाएं');
+  String get arrivedAtPickup => _t('ARRIVED AT PICKUP', 'ପିକଅପ୍ରେ ପହଞ୍ଚିଗଲି', 'पिकअप पर पहुँच गए');
+  String get enterPickupOtp => _t('Enter Pickup Verification OTP', 'ପିକଅପ୍ OTP ଦିଅନ୍ତୁ', 'पिकअप ओटीपी दर्ज करें');
+  String get startTrip => _t('START TRIP', 'ଯାତ୍ରା ଆରମ୍ଭ କରନ୍ତୁ', 'यात्रा शुरू करें');
+  String get inTransitToDrop => _t('In Transit to Drop-off', 'ଡ୍ରପ୍-ଅଫ୍ ଆଡ଼କୁ ଯାଉଛି', 'ड्रॉप-ऑफ की ओर जा रहे हैं');
+  String get arrivedAtDrop => _t('ARRIVED AT DROP-OFF', 'ଡ୍ରପ୍-ଅଫ୍ରେ ପହଞ୍ଚିଗଲି', 'ड्रॉप-ऑफ पर पहुँच गए');
+  String get completeDelivery => _t('COMPLETE DELIVERY', 'ଡେଲିଭରୀ ସମ୍ପୂର୍ଣ୍ଣ କରନ୍ତୁ', 'डिलीवरी पूरी करें');
+  String get callCustomer => _t('Call Customer', 'ଗ୍ରାହକଙ୍କୁ କଲ୍ କରନ୍ତୁ', 'ग्राहक को कॉल करें');
+  String get googleMapsNav => _t('Navigate via Maps', 'ମ୍ୟାପ୍ସ ମାଧ୍ୟମରେ ଯାଆନ୍ତୁ', 'मैप्स के माध्यम से जाएं');
+
+  // Navigation Bar Tabs
+  String get tabHome => _t('Duty', 'ଡ୍ୟୁଟି', 'ड्यूटी');
+  String get tabTrips => _t('My Trips', 'ମୋ ଯାତ୍ରା', 'मेरी यात्राएं');
+  String get tabEarnings => _t('Earnings', 'ରୋଜଗାର', 'कमाई');
+  String get tabAccount => _t('Account', 'ଖାତା', 'खाता');
+
+  // Earnings & Trips
+  String get todaysEarnings => _t('Today\'s Earnings', 'ଆଜିର ରୋଜଗାର', 'आज की कमाई');
+  String get completedTrips => _t('Completed Trips', 'ସମ୍ପୂର୍ଣ୍ଣ ଯାତ୍ରା', 'पूरी हुई यात्राएं');
+  String get onlineHours => _t('Online Hours', 'ଅନଲାଇନ୍ ସମୟ', 'ऑनलाइन घंटे');
+  String get payoutBalance => _t('Wallet / Payout Balance', 'ୱାଲେଟ୍ / ପେଆଉଟ୍ ବାଲାନ୍ସ', 'वॉलेट / पेआउट बैलेंस');
+  String get requestPayout => _t('Request Payout', 'ପେଆଉଟ୍ ଅନୁରୋଧ', 'पेआउट का अनुरोध करें');
+  String get tripHistory => _t('Trip History', 'ଯାତ୍ରା ଇତିହାସ', 'यात्रा इतिहास');
+
+  // Driver Account / Profile
+  String get partnerProfile => _t('Partner Profile', 'ପାର୍ଟନର୍ ପ୍ରୋଫାଇଲ୍', 'पार्टनर प्रोफ़ाइल');
+  String get vehicleDetails => _t('Vehicle Details', 'ଗାଡ଼ି ବିବରଣୀ', 'वाहन विवरण');
+  String get appLanguage => _t('App Language', 'ଆପ୍ ଭାଷା', 'ऐप भाषा');
+  String get helpSupport => _t('Help & Partner Support', 'ସାହାଯ୍ୟ ଏବଂ ପାର୍ଟନର୍ ସପୋର୍ଟ', 'सहायता और पार्टनर सपोर्ट');
+  String get termsConditions => _t('Terms & Operating Rules', 'ସର୍ତ୍ତାବଳୀ ଏବଂ ନିୟମ', 'शर्तें और नियम');
+  String get signOut => _t('Sign Out', 'ସାଇନ୍ ଆଉଟ୍', 'साइन आउट');
+  String get signOutConfirm => _t('Sign out of VAYA Partner?', 'VAYA ପାର୍ଟନର୍ ରୁ ସାଇନ୍ ଆଉଟ୍ କରିବେ?', 'VAYA पार्टनर से साइन आउट करें?');
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -96,8 +195,21 @@ void main() async {
   runApp(const VayaDriverApp());
 }
 
-class VayaDriverApp extends StatelessWidget {
+class VayaDriverApp extends StatefulWidget {
   const VayaDriverApp({super.key});
+
+  @override
+  State<VayaDriverApp> createState() => _VayaDriverAppState();
+}
+
+class _VayaDriverAppState extends State<VayaDriverApp> {
+  Locale _locale = const Locale('en');
+
+  void setLocale(Locale locale) {
+    setState(() {
+      _locale = locale;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +217,97 @@ class VayaDriverApp extends StatelessWidget {
       title: 'VAYA Driver Partner',
       debugShowCheckedModeBanner: false,
       theme: VayaDriverTheme.themeData,
+      locale: _locale,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('en'),
+        Locale('or'),
+        Locale('hi'),
+      ],
       home: const DriverAuthWrapper(),
+    );
+  }
+}
+
+/// Driver Language Picker Screen
+class DriverLanguageSelectionScreen extends StatelessWidget {
+  final Function(Locale) onLanguageSelected;
+  const DriverLanguageSelectionScreen({super.key, required this.onLanguageSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: VayaDriverTheme.saffron,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'V',
+                      style: TextStyle(
+                        fontFamily: 'Outfit',
+                        fontSize: 48,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 32),
+              const Text(
+                'Choose Partner Language\nଭାଷା ଚୟନ କରନ୍ତୁ\nभाषा चुनें',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  height: 1.5,
+                  color: VayaDriverTheme.signalCream,
+                ),
+              ),
+              const SizedBox(height: 48),
+              ElevatedButton(
+                onPressed: () {
+                  onLanguageSelected(const Locale('en'));
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DriverLoginScreen()));
+                },
+                child: const Text('English'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () {
+                  onLanguageSelected(const Locale('or'));
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DriverLoginScreen()));
+                },
+                child: const Text('ଓଡ଼ିଆ (Odia)'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () {
+                  onLanguageSelected(const Locale('hi'));
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DriverLoginScreen()));
+                },
+                child: const Text('हिन्दी (Hindi)'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -670,6 +872,7 @@ class _DriverMainNavigationState extends State<DriverMainNavigation> with Widget
 
   @override
   Widget build(BuildContext context) {
+    final dl = LocalizedDriverStrings.of(context);
     // If an active trip is underway, switch to a full-screen operational trip flow (hiding bottom navigation)
     if (_activeJob != null) {
       return ActiveTripWorkflowScreen(
@@ -700,11 +903,11 @@ class _DriverMainNavigationState extends State<DriverMainNavigation> with Widget
         unselectedItemColor: VayaDriverTheme.slate,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontSize: 12),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.local_shipping_outlined), activeIcon: Icon(Icons.local_shipping), label: 'Trips'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_outlined), activeIcon: Icon(Icons.account_balance_wallet), label: 'Earnings'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'Account'),
+        items: [
+          BottomNavigationBarItem(icon: const Icon(Icons.home_outlined), activeIcon: const Icon(Icons.home), label: dl.tabHome),
+          BottomNavigationBarItem(icon: const Icon(Icons.local_shipping_outlined), activeIcon: const Icon(Icons.local_shipping), label: dl.tabTrips),
+          BottomNavigationBarItem(icon: const Icon(Icons.account_balance_wallet_outlined), activeIcon: const Icon(Icons.account_balance_wallet), label: dl.tabEarnings),
+          BottomNavigationBarItem(icon: const Icon(Icons.person_outline), activeIcon: const Icon(Icons.person), label: dl.tabAccount),
         ],
       ),
     );
@@ -871,6 +1074,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     );
     setState(() {
       _currentPosition = LatLng(pos.latitude, pos.longitude);
+      _mapController?.animateCamera(CameraUpdate.newLatLng(_currentPosition!));
     });
   }
 
@@ -1741,7 +1945,6 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
 
   void _showDisputeModal(Map<String, dynamic> entry) {
     final TextEditingController reasonController = TextEditingController();
-    bool isSubmitting = false;
 
     showDialog(
       context: context,
@@ -2062,8 +2265,12 @@ class DriverAccountScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final dl = LocalizedDriverStrings.of(context);
+    final currentLangCode = Localizations.localeOf(context).languageCode;
+    final currentLangName = currentLangCode == 'or' ? 'ଓଡ଼ିଆ (Odia)' : (currentLangCode == 'hi' ? 'हिन्दी (Hindi)' : 'English');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Partner Account')),
+      appBar: AppBar(title: Text(dl.partnerProfile)),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -2084,41 +2291,112 @@ class DriverAccountScreen extends StatelessWidget {
           const SizedBox(height: 20),
           ListTile(
             leading: const Icon(Icons.phone, color: VayaDriverTheme.signalCream),
-            title: const Text('Phone Number'),
+            title: Text(dl.enterMobile),
             subtitle: Text(driverData['phone'] ?? user?.phoneNumber ?? 'Not provided'),
           ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.fitness_center, color: VayaDriverTheme.signalCream),
-            title: const Text('Max Weight Capacity'),
-            subtitle: Text('${driverData['weight_capacity'] ?? 20} kg'),
+            title: Text(dl.vehicleDetails),
+            subtitle: Text('${driverData['weight_capacity'] ?? 20} kg max payload'),
           ),
           const Divider(),
-          const ListTile(
-            leading: Icon(Icons.verified, color: VayaDriverTheme.routeGreen),
-            title: Text('Document Verification Status'),
-            subtitle: Text('Driving License & Vehicle RC Verified'),
-            trailing: Icon(Icons.check_circle, color: VayaDriverTheme.routeGreen),
+          ListTile(
+            leading: const Icon(Icons.language, color: VayaDriverTheme.saffron),
+            title: Text(dl.appLanguage, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('Current: $currentLangName', style: const TextStyle(color: VayaDriverTheme.signalCream)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => SimpleDialog(
+                  backgroundColor: const Color(0xFF1A1A17),
+                  title: Text(dl.chooseLanguage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaDriverTheme.signalCream)),
+                  children: [
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.findAncestorStateOfType<_VayaDriverAppState>()?.setLocale(const Locale('en'));
+                      },
+                      child: Row(
+                        children: [
+                          if (currentLangCode == 'en') const Icon(Icons.check_circle, color: VayaDriverTheme.saffron, size: 20) else const Icon(Icons.radio_button_unchecked, size: 20, color: VayaDriverTheme.slate),
+                          const SizedBox(width: 12),
+                          const Text('English', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaDriverTheme.signalCream)),
+                        ],
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.findAncestorStateOfType<_VayaDriverAppState>()?.setLocale(const Locale('or'));
+                      },
+                      child: Row(
+                        children: [
+                          if (currentLangCode == 'or') const Icon(Icons.check_circle, color: VayaDriverTheme.saffron, size: 20) else const Icon(Icons.radio_button_unchecked, size: 20, color: VayaDriverTheme.slate),
+                          const SizedBox(width: 12),
+                          const Text('ଓଡ଼ିଆ (Odia)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaDriverTheme.signalCream)),
+                        ],
+                      ),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.findAncestorStateOfType<_VayaDriverAppState>()?.setLocale(const Locale('hi'));
+                      },
+                      child: Row(
+                        children: [
+                          if (currentLangCode == 'hi') const Icon(Icons.check_circle, color: VayaDriverTheme.saffron, size: 20) else const Icon(Icons.radio_button_unchecked, size: 20, color: VayaDriverTheme.slate),
+                          const SizedBox(width: 12),
+                          const Text('हिन्दी (Hindi)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaDriverTheme.signalCream)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
           const Divider(),
-          const ListTile(
-            leading: Icon(Icons.account_balance, color: VayaDriverTheme.liveBlue),
-            title: Text('Bank Account & Payout Details'),
-            subtitle: Text('Direct Bank Transfer (Active)'),
-            trailing: Icon(Icons.chevron_right),
+          ListTile(
+            leading: const Icon(Icons.verified, color: VayaDriverTheme.routeGreen),
+            title: Text(dl.partnerProfile),
+            subtitle: const Text('Driving License & Vehicle RC Verified'),
+            trailing: const Icon(Icons.check_circle, color: VayaDriverTheme.routeGreen),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.account_balance, color: VayaDriverTheme.liveBlue),
+            title: Text(dl.payoutBalance),
+            subtitle: const Text('Direct Bank Transfer (Active)'),
+            trailing: const Icon(Icons.chevron_right),
           ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Sign Out', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            title: Text(dl.signOut, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
             onTap: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
-                  (route) => false,
-                );
+              final confirmOut = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1A1A17),
+                  title: Text(dl.signOutConfirm, style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold)),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(dl.cancel)),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(dl.signOut, style: const TextStyle(color: Colors.red))),
+                  ],
+                ),
+              );
+
+              if (confirmOut == true) {
+                await FirebaseAuth.instance.signOut();
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
+                    (route) => false,
+                  );
+                }
               }
             },
           ),

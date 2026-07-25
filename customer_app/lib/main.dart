@@ -317,10 +317,30 @@ class LocalizedStrings {
   String get privacyAndLegal => _t('Privacy & legal', 'ଗୋପନୀୟତା ଏବଂ ଆଇନ', 'गोपनीयता और कानूनी');
   String get privacyPolicy => _t('Privacy policy & terms', 'ଗୋପନୀୟତା ନୀତି ଏବଂ ସର୍ତ୍ତାବଳୀ', 'गोपनीयता नीति और शर्तें');
   String get downloadMyData => _t('Download my data', 'ମୋ ଡାଟା ଡାଉନଲୋଡ୍', 'मेरा डेटा डाउनलोड करें');
-  String get deleteAccount => _t('Delete account', 'ଖାତା ବିଲୋପ', 'खाता हटाएं');
   String get signOut => _t('Sign out', 'ସାଇନ୍ ଆଉଟ୍', 'साइन आउट');
   String get signOutConfirm => _t('Sign out of VAYA?', 'VAYA ରୁ ସାଇନ୍ ଆଉଟ୍ କରିବେ?', 'VAYA से साइन आउट करें?');
   String get chooseLanguage => _t('Choose language', 'ଭାଷା ଚୟନ କରନ୍ତୁ', 'भाषा चुनें');
+  // Navigation & Tabs
+  String get navHome => _t('Home', 'ମୁଖ୍ୟ', 'होम');
+  String get navOrders => _t('Orders', 'ଅର୍ଡର', 'ऑर्डर');
+  String get navPayments => _t('Payments', 'ଦେୟ', 'भुगतान');
+  String get navAccount => _t('Account', 'ଖାତା', 'खाता');
+
+  // Map & Pin Picker
+  String get dragMapTitle => _t('Set Location on Map', 'ମାନଚିତ୍ରରେ ସ୍ଥାନ ଚୟନ', 'मानचित्र पर स्थान सेट करें');
+  String get confirmLocation => _t('Confirm Location', 'ସ୍ଥାନ ନିଶ୍ଚିତ କରନ୍ତୁ', 'स्थान की पुष्टि करें');
+  String get addressDetailsLabel => _t('House / Flat / Building / Gate details', 'ଗୃହ / ଫ୍ଲାଟ / ବିଲ୍ଡିଂ / ଗେଟ୍ ବିବରଣୀ', 'मकान / फ्लैट / बिल्डिंग / गेट विवरण');
+  String get senderReceiverPhone => _t('Contact Phone Number', 'ସମ୍ପର୍କ ମୋବାଇଲ୍ ନମ୍ବର', 'संपर्क मोबाइल नंबर');
+
+  // Helper & Options
+  String get needHelpers => _t('Need Helpers?', 'ସହାୟକ ଆବଶ୍ୟକ କି?', 'क्या सहायक चाहिए?');
+  String get noHelper => _t('No Helper', 'ସହାୟକ ନାହିଁ', 'कोई सहायक नहीं');
+  String get oneHelper => _t('1 Helper (+₹150)', '୧ ଜଣ ସହାୟକ (+₹150)', '1 सहायक (+₹150)');
+  String get twoHelpers => _t('2 Helpers (+₹300)', '୨ ଜଣ ସହାୟକ (+₹300)', '2 सहायक (+₹300)');
+  String get applyCoupon => _t('Apply Promo / Coupon', 'ପ୍ରୋମୋ / କୁପନ ବ୍ୟବହାର କରନ୍ତୁ', 'प्रोमो / कूपन लागू करें');
+  String get totalAmount => _t('Total Amount', 'ମୋଟ ରାଶି', 'कुल राशि');
+  String get confirmAndBook => _t('Confirm & Book Now', 'ନିଶ୍ଚିତ କରନ୍ତୁ ଏବଂ ବୁକ୍ କରନ୍ତୁ', 'पुष्टि करें और अभी बुक करें');
+  String get subheadingDeliver => _t('Reliable Intra-city Logistics', 'ବିଶ୍ୱସନୀୟ ଆନ୍ତଃସହର ଲଜିଷ୍ଟିକ୍ସ', 'विश्वसनीय अंतर-शहर रसद');
 }
 
 /// 1. Language Picker Screen
@@ -756,8 +776,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = LocalizedStrings.of(context);
     final List<Widget> pages = [
-      const HomeScreen(),
+      HomeScreen(onVehicleSelected: (vehicle) {
+        setState(() => _currentIndex = 0);
+      }),
       OrdersScreen(onTrackActive: () {
         if (_activeBooking != null) {
           Navigator.push(
@@ -798,7 +821,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
+                        color: Colors.black.withValues(alpha: 0.2),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
