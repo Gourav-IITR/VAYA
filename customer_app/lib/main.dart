@@ -152,39 +152,67 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Future<void> _checkAuthState() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      setState(() => _checking = false);
+      if (mounted) setState(() => _checking = false);
       return;
     }
 
+    // Force refresh the token to prevent 401 unauthenticated errors due to expired tokens
+    String? token;
     try {
-      final token = await user.getIdToken();
-      final res = await http.get(
-        Uri.parse('$apiBaseUrl/api/customer/me'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        if (mounted) {
-          if (data['exists'] == true) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
-              (route) => false,
-            );
-          } else {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-              (route) => false,
-            );
-          }
-        }
-      } else {
-        setState(() => _checking = false);
-      }
+      token = await user.getIdToken(true);
     } catch (e) {
-      debugPrint("Auth check error: $e");
+      debugPrint("Token refresh failed: $e, falling back to cached token");
+      try {
+        token = await user.getIdToken(false);
+      } catch (_) {}
+    }
+
+    // Try verifying profile with retry logic (up to 3 attempts) for cold-start server resilience
+    int attempts = 0;
+    http.Response? res;
+    while (attempts < 3) {
+      try {
+        if (token != null) {
+          res = await http.get(
+            Uri.parse('$apiBaseUrl/api/customer/me'),
+            headers: {'Authorization': 'Bearer $token'},
+          ).timeout(const Duration(seconds: 8));
+          if (res.statusCode == 200) break;
+        }
+      } catch (e) {
+        debugPrint("Network/server check attempt ${attempts + 1} failed: $e");
+      }
+      attempts++;
+      if (attempts < 3) await Future.delayed(const Duration(milliseconds: 1200));
+    }
+
+    if (!mounted) return;
+
+    if (res != null && res.statusCode == 200) {
+      final data = json.decode(res.body);
+      if (data['exists'] == true) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+          (route) => false,
+        );
+      } else {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+          (route) => false,
+        );
+      }
+    } else if (res == null || res.statusCode != 401) {
+      // If user is logged into Firebase but server is cold-starting or offline, DO NOT kick user to Login screen!
+      // Bypass directly into main app so user remains logged in.
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+        (route) => false,
+      );
+    } else {
+      // Explicit 401 or no valid user -> show login
       setState(() => _checking = false);
     }
   }
