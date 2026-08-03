@@ -2,6 +2,7 @@ import express from 'express';
 import { body, param, validationResult } from 'express-validator';
 import { query } from '../config/db.js';
 import { verifyToken, requireRole } from '../middleware/auth.js';
+import { broadcast } from '../services/websocket.service.js';
 
 const router = express.Router();
 
@@ -137,15 +138,39 @@ router.put(
 
       for (const item of pricing) {
         await query(
-          `INSERT INTO pricing_config (vehicle_type, base_price, base_distance, per_km_price)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO pricing_config (vehicle_type, base_price, base_distance, per_km_price, free_wait_minutes_pickup, free_wait_minutes_dropoff, wait_charge_per_minute)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (vehicle_type) DO UPDATE
            SET base_price = EXCLUDED.base_price,
                base_distance = EXCLUDED.base_distance,
-               per_km_price = EXCLUDED.per_km_price`,
-          [item.vehicle_type, item.base_price, item.base_distance, item.per_km_price]
+               per_km_price = EXCLUDED.per_km_price,
+               free_wait_minutes_pickup = EXCLUDED.free_wait_minutes_pickup,
+               free_wait_minutes_dropoff = EXCLUDED.free_wait_minutes_dropoff,
+               wait_charge_per_minute = EXCLUDED.wait_charge_per_minute`,
+          [
+            item.vehicle_type,
+            item.base_price,
+            item.base_distance,
+            item.per_km_price,
+            item.free_wait_minutes_pickup ?? 10,
+            item.free_wait_minutes_dropoff ?? 10,
+            item.wait_charge_per_minute ?? 2.00
+          ]
         );
       }
+
+      // Fetch and return the updated pricing configuration
+      const result = await query('SELECT * FROM pricing_config');
+      const updatedPricing = result.rows.map(r => ({
+        vehicle_type: r.vehicle_type,
+        base_price: parseFloat(r.base_price),
+        base_distance: parseFloat(r.base_distance),
+        per_km_price: parseFloat(r.per_km_price),
+        description: r.description || '',
+        free_wait_minutes_pickup: parseInt(r.free_wait_minutes_pickup ?? 10),
+        free_wait_minutes_dropoff: parseInt(r.free_wait_minutes_dropoff ?? 10),
+        wait_charge_per_minute: parseFloat(r.wait_charge_per_minute ?? 2.00)
+      }));
 
       // Log to audit log
       await query(
@@ -153,12 +178,56 @@ router.put(
         [adminUid, 'update_pricing', `Updated live vehicle pricing configurations`]
       );
 
-      res.json({ success: true, message: 'Pricing configuration updated successfully.' });
+      // Broadcast pricing update to connected apps
+      broadcast({ type: 'pricing_updated', pricing: updatedPricing });
+
+      res.json({ success: true, message: 'Pricing configuration updated successfully.', pricing: updatedPricing });
     } catch (err) {
       console.error('PUT /api/admin/pricing-config error:', err);
       res.status(500).json({ error: 'Failed to update pricing configuration.' });
     }
   }
 );
+
+// GET /api/admin/daily-payouts - Daily report of all drivers owed money (wallet_balance - outstanding_dues > 0)
+router.get('/daily-payouts', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, name, phone, vehicle_type, vehicle_reg, wallet_balance, outstanding_dues,
+              (wallet_balance - outstanding_dues) AS net_payout_amount,
+              upi_id, bank_account_no, bank_ifsc, bank_account_name
+       FROM drivers
+       WHERE wallet_balance > outstanding_dues
+       ORDER BY (wallet_balance - outstanding_dues) DESC`
+    );
+
+    const payouts = result.rows.map(r => ({
+      driverId: r.id,
+      name: r.name,
+      phone: r.phone,
+      vehicleType: r.vehicle_type,
+      vehicleReg: r.vehicle_reg,
+      availableBalance: parseFloat(r.wallet_balance || 0),
+      outstandingDues: parseFloat(r.outstanding_dues || 0),
+      netPayoutAmount: parseFloat(r.net_payout_amount || 0),
+      payoutDetails: {
+        upiId: r.upi_id || '',
+        bankAccountNo: r.bank_account_no || '',
+        bankIfsc: r.bank_ifsc || '',
+        bankAccountName: r.bank_account_name || ''
+      }
+    }));
+
+    res.json({
+      success: true,
+      totalDriversEligible: payouts.length,
+      totalPayoutSum: payouts.reduce((acc, p) => acc + p.netPayoutAmount, 0),
+      payouts
+    });
+  } catch (err) {
+    console.error('GET /api/admin/daily-payouts error:', err);
+    res.status(500).json({ error: 'Failed to fetch daily payouts report' });
+  }
+});
 
 export default router;

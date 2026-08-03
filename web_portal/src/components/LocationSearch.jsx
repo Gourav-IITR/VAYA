@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
+import VayaLoader from './VayaLoader';
 
 const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org/search';
 const VIEWBOX = '85.70,20.40,85.95,20.20';
@@ -248,14 +249,16 @@ export default function LocationSearch({
               right: '12px',
               top: '50%',
               transform: 'translateY(-50%)',
-              width: '16px',
-              height: '16px',
-              border: '2px solid var(--border-color)',
-              borderTopColor: accentColor,
-              borderRadius: '50%',
-              animation: 'location-search-spin 0.6s linear infinite',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
-          />
+          >
+            <VayaLoader
+              variant="inline"
+              accessibleLabel="Searching locations"
+            />
+          </div>
         )}
       </div>
 

@@ -83,6 +83,10 @@ VALUES
 ('truck', 500.00, 5.0, 35.00, 'Very heavy cargo up to 2,000 kg')
 ON CONFLICT (vehicle_type) DO NOTHING;
 
+ALTER TABLE pricing_config ADD COLUMN IF NOT EXISTS free_wait_minutes_pickup INT DEFAULT 10;
+ALTER TABLE pricing_config ADD COLUMN IF NOT EXISTS free_wait_minutes_dropoff INT DEFAULT 10;
+ALTER TABLE pricing_config ADD COLUMN IF NOT EXISTS wait_charge_per_minute DECIMAL(10, 2) DEFAULT 2.00;
+
 -- Alter drivers table for Wallet & Dues Ledger
 ALTER TABLE drivers ADD COLUMN IF NOT EXISTS wallet_balance DECIMAL(10, 2) DEFAULT 0.00;
 ALTER TABLE drivers ADD COLUMN IF NOT EXISTS outstanding_dues DECIMAL(10, 2) DEFAULT 0.00;
@@ -92,9 +96,22 @@ ALTER TABLE drivers ADD COLUMN IF NOT EXISTS dues_due_date TIMESTAMP WITH TIME Z
 
 -- Alter bookings table for Payment Type & Settlement Tracking
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_type VARCHAR(20) DEFAULT 'cash'; -- 'online', 'cash', 'direct_upi'
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cash_collection_point VARCHAR(10); -- 'PICKUP', 'DROPOFF'
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS commission_amount DECIMAL(10, 2) DEFAULT 0.00;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver_net_earnings DECIMAL(10, 2) DEFAULT 0.00;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_settled BOOLEAN DEFAULT FALSE;
+
+-- Waiting Time Charges & Timestamps for Bookings
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS arrived_pickup_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_verified_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS arrived_dropoff_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_wait_minutes INT DEFAULT 0;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS dropoff_wait_minutes INT DEFAULT 0;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS waiting_charge_pickup DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS waiting_charge_dropoff DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS total_waiting_charge DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS final_cost DECIMAL(10, 2);
 
 -- Partner Ledgers Table (Unified Financial Ledger)
 CREATE TABLE IF NOT EXISTS partner_ledgers (
@@ -107,5 +124,81 @@ CREATE TABLE IF NOT EXISTS partner_ledgers (
     description TEXT NOT NULL,
     is_disputed BOOLEAN DEFAULT FALSE,
     dispute_reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Driver Rating System
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS rating_avg DECIMAL(3, 2) DEFAULT 5.0;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS rating_count INT DEFAULT 0;
+
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating INT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating_comment TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating_skipped BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sender_name VARCHAR(100);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS sender_phone VARCHAR(15);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS receiver_name VARCHAR(100);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS receiver_phone VARCHAR(15);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS goods_category VARCHAR(100);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
+
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE customers ALTER COLUMN phone TYPE VARCHAR(50);
+ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_phone_key;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- Razorpay Payment Integration Schema
+-- ═══════════════════════════════════════════════════════════════════
+
+-- Customer Wallet Balance
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS wallet_balance DECIMAL(10, 2) DEFAULT 0.00;
+
+-- Payment Orders Table (Razorpay order tracking)
+CREATE TABLE IF NOT EXISTS payment_orders (
+    id SERIAL PRIMARY KEY,
+    razorpay_order_id VARCHAR(50) UNIQUE NOT NULL,
+    razorpay_payment_id VARCHAR(50),
+    user_id VARCHAR(128) NOT NULL,
+    purpose VARCHAR(30) NOT NULL,            -- 'booking_fare', 'dues_repayment', 'wallet_topup'
+    booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
+    amount DECIMAL(10, 2) NOT NULL,           -- Amount in INR
+    amount_paise INT NOT NULL,                -- Amount in paise (sent to Razorpay)
+    status VARCHAR(20) DEFAULT 'created',     -- 'created', 'paid', 'failed'
+    verified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Customer Wallet Transactions (top-ups, booking deductions, refunds)
+CREATE TABLE IF NOT EXISTS customer_wallet_transactions (
+    id SERIAL PRIMARY KEY,
+    customer_id VARCHAR(128) REFERENCES customers(id) ON DELETE CASCADE,
+    type VARCHAR(30) NOT NULL,                -- 'topup', 'booking_payment', 'refund'
+    amount DECIMAL(10, 2) NOT NULL,           -- Positive for credit, negative for debit
+    balance_after DECIMAL(10, 2) NOT NULL,
+    razorpay_payment_id VARCHAR(50),
+    booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Track Razorpay payment ID on bookings for online/wallet payments
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(50);
+
+-- Driver Bank Account & UPI Details for Daily Payouts
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS upi_id VARCHAR(100);
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS bank_account_no VARCHAR(50);
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS bank_ifsc VARCHAR(20);
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS bank_account_name VARCHAR(100);
+
+CREATE TABLE IF NOT EXISTS driver_payouts (
+    id SERIAL PRIMARY KEY,
+    driver_id VARCHAR(128) REFERENCES drivers(id) ON DELETE CASCADE,
+    amount DECIMAL(10, 2) NOT NULL,
+    payout_method VARCHAR(30) DEFAULT 'upi',  -- 'upi', 'bank_transfer'
+    reference_id VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'pending',     -- 'pending', 'completed', 'failed'
+    initiated_by VARCHAR(128),                -- admin UID
+    completed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

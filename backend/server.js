@@ -16,6 +16,7 @@ import customerRouter from './src/routes/customer.routes.js';
 import driverRouter from './src/routes/driver.routes.js';
 import bookingRouter from './src/routes/booking.routes.js';
 import ledgerRouter from './src/routes/ledger.routes.js';
+import paymentRouter from './src/routes/payment.routes.js';
 import adminRouter from './src/routes/admin.routes.js';
 import healthRouter from './src/routes/health.routes.js';
 
@@ -25,7 +26,14 @@ const wss = new WebSocketServer({ noServer: true });
 
 // ── Global Middleware ────────────────────────────────────────────────────────
 app.use(helmet());
-app.use(express.json());
+// Parse JSON with raw body capture for Razorpay webhook signature verification
+app.use(express.json({
+  verify: (req, res, buf) => {
+    if (req.originalUrl === '/api/payment/webhook') {
+      req.rawBody = buf;
+    }
+  }
+}));
 
 // CORS Configuration
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*').split(',').map(o => o.trim()).filter(Boolean);
@@ -43,10 +51,14 @@ app.use(cors({
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200, // Limit each IP to 200 requests per window
+  max: 5000, // Increased limit for real-time dashboard and multi-app polling
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' }
+  message: { error: 'Too many requests, please try again later.' },
+  skip: (req) => {
+    // Skip rate limiting for admin and health check endpoints
+    return req.path.startsWith('/api/admin') || req.path.startsWith('/api/health');
+  }
 });
 app.use('/api/', limiter);
 
@@ -54,9 +66,29 @@ app.use('/api/', limiter);
 app.use('/api/customer', customerRouter);
 app.use('/api/driver', driverRouter);
 app.use('/api/booking', bookingRouter);
+app.use('/api/bookings', bookingRouter);
 app.use('/api/ledger', ledgerRouter);
+app.use('/api/payment', paymentRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/health', healthRouter);
+
+// Direct top-level pricing config endpoint
+app.get('/api/pricing-config', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM pricing_config');
+    const pricing = result.rows.map(r => ({
+      vehicle_type: r.vehicle_type,
+      base_price: parseFloat(r.base_price),
+      base_distance: parseFloat(r.base_distance),
+      per_km_price: parseFloat(r.per_km_price),
+      description: r.description || ''
+    }));
+    res.json({ pricing });
+  } catch (err) {
+    console.error('GET /api/pricing-config error:', err);
+    res.status(500).json({ error: 'Failed to fetch pricing configuration' });
+  }
+});
 
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -102,18 +134,6 @@ wss.on('connection', (ws, request, decodedToken) => {
   ws.on('close', async () => {
     unregisterClient(ws);
     console.log(`🔌 WS Client Disconnected: ${decodedToken.uid}`);
-    try {
-      if (decodedToken.uid) {
-        const driverRes = await query('SELECT status FROM drivers WHERE id = $1', [decodedToken.uid]);
-        if (driverRes.rows.length > 0 && driverRes.rows[0].status === 'online') {
-          await query("UPDATE drivers SET status = 'offline' WHERE id = $1", [decodedToken.uid]);
-          broadcast({ type: 'driver_status', driverId: decodedToken.uid, status: 'offline' });
-          console.log(`🔴 Auto-set driver ${decodedToken.uid} to offline on disconnect.`);
-        }
-      }
-    } catch (e) {
-      console.error('Error setting driver offline on disconnect:', e.message);
-    }
   });
 
   ws.on('error', (err) => {
@@ -139,6 +159,28 @@ const checkPendingExpirations = async () => {
   }
 };
 setInterval(checkPendingExpirations, 30000); // Run every 30 seconds
+
+// Periodic driver presence check (Auto-marks drivers offline if app force-closed / no ping for >30s)
+const checkDriverPresence = async () => {
+  try {
+    const res = await query(
+      `UPDATE drivers 
+       SET status = 'offline' 
+       WHERE status = 'online' 
+         AND (last_active_at IS NULL OR last_active_at < NOW() - INTERVAL '30 seconds')
+       RETURNING id, name`
+    );
+    if (res.rows.length > 0) {
+      res.rows.forEach(d => {
+        console.log(`📡 [PRESENCE] Driver ${d.name || d.id} auto-marked OFFLINE (App force-closed / backgrounded)`);
+        broadcast({ type: 'driver_status', driverId: d.id, status: 'offline' });
+      });
+    }
+  } catch (err) {
+    console.error('Failed to run driver presence check:', err.message);
+  }
+};
+setInterval(checkDriverPresence, 15000); // Check presence every 15 seconds
 
 // ── Startup & Initialization ────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;

@@ -17,7 +17,11 @@ if (!connectionString) {
 
 export const pool = new Pool({
   connectionString,
-  ssl: connectionString.includes('localhost') ? false : { rejectUnauthorized: false }
+  ssl: connectionString.includes('localhost') ? false : { rejectUnauthorized: false },
+  // Neon PostgreSQL cold-start auto-sleep wake-up parameters
+  connectionTimeoutMillis: 30000, // 30s timeout for sleeping Neon compute wakeup & connection handshake
+  idleTimeoutMillis: 30000,       // Close idle connections after 30s
+  keepAlive: true,                // Maintain TCP keepalive packets to keep compute warm while active
 });
 
 export const query = (text, params) => pool.query(text, params);

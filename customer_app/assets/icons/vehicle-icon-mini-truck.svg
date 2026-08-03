@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Rear wheels -->
+  <rect x="33" y="149" width="14" height="32" rx="4" fill="#1F2126"/>
+  <rect x="153" y="149" width="14" height="32" rx="4" fill="#1F2126"/>
+
+  <!-- Front wheels -->
+  <rect x="36" y="64" width="12" height="26" rx="4" fill="#1F2126"/>
+  <rect x="152" y="64" width="12" height="26" rx="4" fill="#1F2126"/>
+
+  <!-- Open bed -->
+  <rect x="46" y="79" width="108" height="107" rx="6" fill="#C9CCD1"/>
+  <rect x="46" y="79" width="108" height="14" fill="#F5801E"/>
+  <rect x="46" y="150" width="108" height="10" fill="#F5801E"/>
+  <rect x="46" y="79" width="10" height="107" fill="#8B8E94"/>
+  <rect x="144" y="79" width="10" height="107" fill="#8B8E94"/>
+
+  <!-- Cab -->
+  <rect x="62" y="17" width="76" height="58" rx="12" fill="#E7E9EB"/>
+  <rect x="62" y="17" width="76" height="14" rx="8" fill="#F5801E"/>
+  <rect x="72" y="33" width="56" height="30" rx="4" fill="#4A4D55"/>
+  <rect x="98" y="33" width="4" height="30" fill="#E7E9EB"/>
+
+  <!-- Mirrors -->
+  <rect x="54" y="35" width="8" height="12" rx="2" fill="#2E3138"/>
+  <rect x="138" y="35" width="8" height="12" rx="2" fill="#2E3138"/>
+</svg>

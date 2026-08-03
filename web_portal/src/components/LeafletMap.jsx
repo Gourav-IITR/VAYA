@@ -107,16 +107,29 @@ export default function LeafletMap({
     drivers.forEach((driver) => {
       if (!driver.lat || !driver.lng || driver.status === 'offline') return;
 
-      const emoji = driver.vehicle_type === 'bike' ? '🏍️' : '🚚';
+      const normType = (driver.vehicle_type || driver.vehicleType || 'bike').toLowerCase();
+      let iconFile = 'vehicle-icon-motorcycle.svg';
+      if (normType.includes('three') || normType.includes('3') || normType.includes('auto')) {
+        iconFile = 'vehicle-icon-auto-rickshaw.svg';
+      } else if (normType.includes('ace') || normType.includes('mini')) {
+        iconFile = 'vehicle-icon-mini-truck.svg';
+      } else if (normType.includes('truck') || normType.includes('lcv') || normType.includes('box')) {
+        iconFile = 'vehicle-icon-box-truck.svg';
+      }
+
       const name = driver.name ? driver.name.split(' ')[0] : 'Driver';
       const isOnline = driver.status === 'online';
 
       const driverIcon = L.divIcon({
         className: 'custom-leaflet-driver-marker',
-        html: `<div style="background:${isOnline ? '#116E45' : '#2E63E8'};color:white;padding:4px 8px;border-radius:16px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;gap:4px;white-space:nowrap;">
-                 <span>${emoji}</span><span>${name}</span>
+        html: `<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+                 <img src="/icons/${iconFile}" style="width:50px;height:50px;object-fit:contain;filter:drop-shadow(0px 3px 6px rgba(0,0,0,0.4));" alt="${normType}"/>
+                 <div style="margin-top:2px;background:rgba(15,23,42,0.9);color:white;padding:2px 8px;border-radius:10px;font-weight:bold;font-size:11px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);letter-spacing:0.3px;">
+                   ${name}
+                 </div>
                </div>`,
-        iconAnchor: [30, 15],
+        iconSize: [50, 70],
+        iconAnchor: [25, 60],
       });
 
       L.marker([driver.lat, driver.lng], { icon: driverIcon })

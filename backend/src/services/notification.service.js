@@ -17,7 +17,7 @@ export const sendNotificationToUser = async (userId, title, body, data = {}) => 
     }
 
     if (!token) {
-      console.warn(`⚠️ FCM: No FCM token registered for user: ${userId}`);
+      console.warn(`[FCM] No FCM token registered for user: ${userId}`);
       return false;
     }
 
@@ -31,10 +31,10 @@ export const sendNotificationToUser = async (userId, title, body, data = {}) => 
     };
 
     const response = await messaging.send(message);
-    console.log(`✉️ FCM: Notification sent to ${userId} successfully. ID: ${response}`);
+    console.log(`[FCM] Notification sent to ${userId} successfully. ID: ${response}`);
     return true;
   } catch (err) {
-    console.error(`❌ FCM: Failed to send notification to user ${userId}:`, err.message);
+    console.error(`[FCM] Failed to send notification to user ${userId}:`, err.message);
     return false;
   }
 };
@@ -57,12 +57,23 @@ export const sendNotificationToDrivers = async (driverIds, title, body, data = {
         ...data,
         click_action: 'FLUTTER_NOTIFICATION_CLICK'
       },
+      android: {
+        priority: 'high',
+        notification: {
+          title,
+          body,
+          channelId: 'vaya_order_requests',
+          priority: 'max',
+          visibility: 'public'
+        }
+      },
       tokens
     };
 
     const response = await messaging.sendEachForMulticast(message);
-    console.log(`✉️ FCM: Multicast notification sent to ${tokens.length} drivers. Success: ${response.successCount}, Failure: ${response.failureCount}`);
+    console.log(`[FCM] Multicast notification sent to ${tokens.length} drivers. Success: ${response.successCount}, Failure: ${response.failureCount}`);
   } catch (err) {
-    console.error('❌ FCM: Multicast failed:', err.message);
+    console.error('[FCM] Multicast failed:', err.message);
   }
 };
+

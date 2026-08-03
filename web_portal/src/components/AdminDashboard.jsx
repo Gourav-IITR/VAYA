@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import LeafletMap from './LeafletMap';
+import VayaLoader from './VayaLoader';
 import { 
   Users, 
   Truck, 
@@ -12,15 +13,42 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:5001' : 'https://vaya-backend-275777907648.us-central1.run.app';
-const wsBaseUrl = import.meta.env.DEV ? 'ws://localhost:5001' : 'wss://vaya-backend-275777907648.us-central1.run.app';
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://localhost:5001';
+  }
+  return import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5001' : 'https://vaya-backend-275777907648.us-central1.run.app');
+};
+
+const getWsBaseUrl = () => {
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'ws://localhost:5001';
+  }
+  return import.meta.env.VITE_WS_BASE_URL || (import.meta.env.DEV ? 'ws://localhost:5001' : 'wss://vaya-backend-275777907648.us-central1.run.app');
+};
+
+const apiBaseUrl = getApiBaseUrl();
+const wsBaseUrl = getWsBaseUrl();
 
 const defaultPricing = [
-  { vehicle_type: 'bike', base_price: 40, base_distance: 2, per_km_price: 10, description: 'Quick deliveries up to 20 kg' },
-  { vehicle_type: 'three_wheeler', base_price: 120, base_distance: 3, per_km_price: 18, description: 'Medium cargo up to 150 kg' },
-  { vehicle_type: 'ace', base_price: 250, base_distance: 5, per_km_price: 25, description: 'Heavy cargo up to 600 kg' },
-  { vehicle_type: 'truck', base_price: 500, base_distance: 5, per_km_price: 35, description: 'Very heavy cargo up to 2,000 kg' },
+  { vehicle_type: 'bike', base_price: 40, base_distance: 2, per_km_price: 10, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Quick deliveries up to 20 kg' },
+  { vehicle_type: 'three_wheeler', base_price: 120, base_distance: 3, per_km_price: 18, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Medium cargo up to 150 kg' },
+  { vehicle_type: 'ace', base_price: 250, base_distance: 5, per_km_price: 25, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Heavy cargo up to 600 kg' },
+  { vehicle_type: 'truck', base_price: 500, base_distance: 5, per_km_price: 35, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Very heavy cargo up to 2,000 kg' },
 ];
+
+const loadCachedPricing = () => {
+  try {
+    const cached = localStorage.getItem('vaya_pricing_config');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.error('Error loading cached pricing:', e);
+  }
+  return defaultPricing;
+};
 
 export default function AdminDashboard({ adminUser }) {
   const [activeTab, setActiveTab] = useState('orders'); // orders, drivers, audit, pricing
@@ -35,7 +63,7 @@ export default function AdminDashboard({ adminUser }) {
   const [bookings, setBookings] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
-  const [pricingConfig, setPricingConfig] = useState(defaultPricing);
+  const [pricingConfig, setPricingConfig] = useState(loadCachedPricing);
   const [isLoading, setIsLoading] = useState(true);
 
   // Live clock
@@ -70,20 +98,36 @@ export default function AdminDashboard({ adminUser }) {
         return null;
       };
 
-      const [metricsData, bookingsData, driversData, auditData, pricingData] = await Promise.all([
+      const [metricsData, bookingsData, driversData, auditData] = await Promise.all([
         fetchJson(`${apiBaseUrl}/api/admin/dashboard`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/bookings`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/drivers`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/audit-log`, { headers }),
-        fetchJson(`${apiBaseUrl}/api/booking/pricing-config`)
       ]);
+
+      const pricingData = await fetchJson(`${apiBaseUrl}/api/health/pricing-config`);
 
       if (metricsData) setMetrics(metricsData.metrics || {});
       if (bookingsData) setBookings(bookingsData.bookings || []);
       if (driversData) setDrivers(driversData.drivers || []);
       if (auditData) setAuditLogs(auditData.logs || []);
-      if (pricingData && pricingData.pricing && pricingData.pricing.length > 0) {
-        setPricingConfig(pricingData.pricing);
+
+      const list = pricingData?.pricing || (Array.isArray(pricingData) ? pricingData : null);
+      if (list && list.length > 0) {
+        const formatted = list.map(item => ({
+          vehicle_type: item.vehicle_type,
+          base_price: Number(item.base_price),
+          base_distance: Number(item.base_distance),
+          per_km_price: Number(item.per_km_price),
+          free_wait_minutes_pickup: Number(item.free_wait_minutes_pickup ?? 10),
+          free_wait_minutes_dropoff: Number(item.free_wait_minutes_dropoff ?? 10),
+          wait_charge_per_minute: Number(item.wait_charge_per_minute ?? 2.00),
+          description: item.description || ''
+        }));
+        setPricingConfig(formatted);
+        try {
+          localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+        } catch (e) {}
       }
     } catch (e) {
       console.error('Failed to load dashboard data:', e);
@@ -94,25 +138,61 @@ export default function AdminDashboard({ adminUser }) {
 
   const handleUpdatePricing = async (e) => {
     e.preventDefault();
-    if (!window.confirm('Save these live delivery rates?')) return;
+    if (!window.confirm('Save these live delivery rates & waiting charges?')) return;
     try {
       const token = await adminUser.getIdToken();
+      const payload = pricingConfig.map(p => ({
+        vehicle_type: p.vehicle_type,
+        base_price: parseFloat(p.base_price) || 0,
+        base_distance: parseFloat(p.base_distance) || 0,
+        per_km_price: parseFloat(p.per_km_price) || 0,
+        free_wait_minutes_pickup: parseInt(p.free_wait_minutes_pickup) || 0,
+        free_wait_minutes_dropoff: parseInt(p.free_wait_minutes_dropoff) || 0,
+        wait_charge_per_minute: parseFloat(p.wait_charge_per_minute) || 0
+      }));
+
+      // Instantly save to local state and localStorage for instant UI feedback
+      setPricingConfig(payload);
+      try {
+        localStorage.setItem('vaya_pricing_config', JSON.stringify(payload));
+      } catch (err) {}
+
       const res = await fetch(`${apiBaseUrl}/api/admin/pricing-config`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ pricing: pricingConfig })
+        body: JSON.stringify({ pricing: payload })
       });
+
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const rawList = data.pricing || payload;
+        const formatted = rawList.map(item => ({
+          vehicle_type: item.vehicle_type,
+          base_price: Number(item.base_price),
+          base_distance: Number(item.base_distance),
+          per_km_price: Number(item.per_km_price),
+          free_wait_minutes_pickup: Number(item.free_wait_minutes_pickup ?? 10),
+          free_wait_minutes_dropoff: Number(item.free_wait_minutes_dropoff ?? 10),
+          wait_charge_per_minute: Number(item.wait_charge_per_minute ?? 2.00),
+          description: item.description || ''
+        }));
+        setPricingConfig(formatted);
+        try {
+          localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+        } catch (e) {}
         alert('Pricing rates updated live successfully!');
-        fetchData();
+      } else if (res.status === 429) {
+        alert('Rate limit exceeded on backend. Your local rates are saved and will sync automatically shortly.');
       } else {
-        alert('Failed to update pricing.');
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to update pricing on server: ${errData.error || 'Unknown error'}`);
       }
     } catch (e) {
       console.error('Error updating pricing:', e);
+      alert('Error updating pricing configuration.');
     }
   };
 
@@ -140,13 +220,31 @@ export default function AdminDashboard({ adminUser }) {
                 return [data.driver, ...prev];
               }
             });
-            fetchData();
           } else if (data.type === 'booking_created') {
             setBookings(prev => [data.booking, ...prev]);
-            fetchData();
           } else if (data.type === 'booking_accepted' || data.type === 'booking_transit' || data.type === 'booking_status') {
-            setBookings(prev => prev.map(b => b.id === data.booking.id ? data.booking : b));
-            fetchData();
+            setBookings(prev => prev.map(b => b.id === (data.booking?.id || data.bookingId) ? { ...b, ...data.booking } : b));
+          } else if (data.type === 'pricing_updated' && data.pricing) {
+            const formatted = data.pricing.map(item => ({
+              vehicle_type: item.vehicle_type,
+              base_price: Number(item.base_price),
+              base_distance: Number(item.base_distance),
+              per_km_price: Number(item.per_km_price),
+              free_wait_minutes_pickup: Number(item.free_wait_minutes_pickup ?? 10),
+              free_wait_minutes_dropoff: Number(item.free_wait_minutes_dropoff ?? 10),
+              wait_charge_per_minute: Number(item.wait_charge_per_minute ?? 2.00),
+              description: item.description || ''
+            }));
+            setPricingConfig(formatted);
+            try {
+              localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+            } catch (e) {}
+          }
+        };
+            setPricingConfig(formatted);
+            try {
+              localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+            } catch (e) {}
           }
         };
 
@@ -300,8 +398,13 @@ export default function AdminDashboard({ adminUser }) {
           {/* Table Container */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
             {isLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <span className="spinner" />
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '240px' }}>
+                <VayaLoader
+                  variant="section"
+                  size="md"
+                  message="Loading dashboard data..."
+                  accessibleLabel="Loading dashboard metrics and records"
+                />
               </div>
             ) : (
               <>
@@ -364,6 +467,7 @@ export default function AdminDashboard({ adminUser }) {
                       <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)', fontWeight: 'bold' }}>
                         <th style={{ padding: '12px 8px' }}>Driver</th>
                         <th style={{ padding: '12px 8px' }}>Phone Number</th>
+                        <th style={{ padding: '12px 8px' }}>Rating</th>
                         <th style={{ padding: '12px 8px' }}>Vehicle Info</th>
                         <th style={{ padding: '12px 8px' }}>Capacity</th>
                         <th style={{ padding: '12px 8px' }}>Approval Status</th>
@@ -373,13 +477,19 @@ export default function AdminDashboard({ adminUser }) {
                     <tbody>
                       {drivers.length === 0 ? (
                         <tr>
-                          <td colSpan="6" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>No driver partners registered.</td>
+                          <td colSpan="7" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>No driver partners registered.</td>
                         </tr>
                       ) : (
                         drivers.map(d => (
                           <tr key={d.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                             <td style={{ padding: '12px 8px', fontWeight: 'bold' }}>{d.name}</td>
                             <td style={{ padding: '12px 8px' }}>{d.phone}</td>
+                            <td style={{ padding: '12px 8px' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 'bold', color: '#ca8a04' }}>
+                                ★ {d.rating_avg ? parseFloat(d.rating_avg).toFixed(1) : '5.0'}
+                                <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 'normal' }}>({d.rating_count || 0})</span>
+                              </div>
+                            </td>
                             <td style={{ padding: '12px 8px' }}>
                               <div style={{ textTransform: 'capitalize', fontWeight: 500 }}>{d.vehicle_type}</div>
                               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{d.vehicle_reg}</div>
@@ -462,8 +572,8 @@ export default function AdminDashboard({ adminUser }) {
                               className="form-input"
                               style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
                               onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, base_price: val } : p));
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, base_price: val === '' ? '' : val } : p));
                               }}
                             />
                           </div>
@@ -477,8 +587,8 @@ export default function AdminDashboard({ adminUser }) {
                               className="form-input"
                               style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
                               onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, base_distance: val } : p));
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, base_distance: val === '' ? '' : val } : p));
                               }}
                             />
                           </div>
@@ -491,17 +601,76 @@ export default function AdminDashboard({ adminUser }) {
                               className="form-input"
                               style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
                               onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, per_km_price: val } : p));
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, per_km_price: val === '' ? '' : val } : p));
                               }}
                             />
                           </div>
                         </div>
                       </div>
-                    ))}
+                    {/* Waiting Time Charges Card */}
+                    <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid #fde68a', background: '#fffbeb', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Clock size={16} style={{ color: '#d97706' }} />
+                        <span style={{ fontWeight: 'bold', color: '#92400e', fontSize: '13px' }}>
+                          Waiting Time Charges Configuration
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
+                        Drivers get free waiting time at pickup and drop-off. Standard per-minute charges apply after free minutes expire.
+                      </p>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Pickup Wait (mins)</label>
+                          <input 
+                            type="number" 
+                            min="0"
+                            value={pricingConfig[0]?.free_wait_minutes_pickup ?? 10}
+                            className="form-input"
+                            style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPricingConfig(prev => prev.map(p => ({ ...p, free_wait_minutes_pickup: val === '' ? '' : parseInt(val) || 0 })));
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Dropoff Wait (mins)</label>
+                          <input 
+                            type="number" 
+                            min="0"
+                            value={pricingConfig[0]?.free_wait_minutes_dropoff ?? 10}
+                            className="form-input"
+                            style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPricingConfig(prev => prev.map(p => ({ ...p, free_wait_minutes_dropoff: val === '' ? '' : parseInt(val) || 0 })));
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Charge / Minute (₹)</label>
+                          <input 
+                            type="number" 
+                            step="0.5"
+                            min="0"
+                            value={pricingConfig[0]?.wait_charge_per_minute ?? 2.0}
+                            className="form-input"
+                            style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPricingConfig(prev => prev.map(p => ({ ...p, wait_charge_per_minute: val === '' ? '' : parseFloat(val) || 0 })));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
 
                     <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 20px', fontSize: '13px' }}>
-                      Save Live Rates
+                      Save Live Rates & Waiting Charges
                     </button>
                   </form>
                 )}

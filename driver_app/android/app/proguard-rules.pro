@@ -20,3 +20,13 @@
 
 # Play Core Splitcompat / Deferred Components
 -dontwarn com.google.android.play.core.**
+
+# Razorpay Rules
+-keepattributes *Annotation*
+-dontwarn com.razorpay.**
+-keep class com.razorpay.** {*;}
+-optimizations !method/inlining/*
+-keepclasseswithmembers class * {
+  public void onPayment*(...);
+}
+

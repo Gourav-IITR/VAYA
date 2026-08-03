@@ -147,23 +147,39 @@ export async function fetchDrivingRouteWithDistance(origin, destination) {
  * @param {number} [weightKg=50]   – cargo weight
  * @returns {number} estimated price in ₹
  */
-export function calculateDeliveryPrice(distanceMeters, vehicleType, weightKg = 50) {
+export function calculateDeliveryPrice(distanceMeters, vehicleType, weightKg = 50, pricingConfig = null) {
   const km = distanceMeters / 1000;
+
+  const normalizedType = vehicleType === 'mini_truck' ? 'ace' : (vehicleType === 'large_truck' ? 'truck' : vehicleType);
+
+  if (pricingConfig && Array.isArray(pricingConfig) && pricingConfig.length > 0) {
+    const config = pricingConfig.find(p => p.vehicle_type === normalizedType || p.vehicle_type === vehicleType);
+    if (config) {
+      const basePrice = Number(config.base_price);
+      const baseDist = Number(config.base_distance);
+      const perKmPrice = Number(config.per_km_price);
+      const extraKm = Math.max(0, km - baseDist);
+      let weightSurcharge = 0;
+      if (weightKg > 100 && (normalizedType === 'ace' || normalizedType === 'truck' || normalizedType === 'three_wheeler')) {
+        weightSurcharge = (weightKg - 100) * 0.5;
+      }
+      return Math.round(basePrice + (extraKm * perKmPrice) + weightSurcharge);
+    }
+  }
 
   let base = 40;
   let perKm = 6;
 
-  if (vehicleType === 'mini_truck') {
+  if (vehicleType === 'mini_truck' || vehicleType === 'ace' || vehicleType === 'three_wheeler') {
     base = 180;
     perKm = 10;
-  } else if (vehicleType === 'large_truck') {
+  } else if (vehicleType === 'large_truck' || vehicleType === 'truck') {
     base = 450;
     perKm = 15;
   }
 
-  // Weight surcharge for trucks (₹0.5 per kg above 100 kg)
   let weightSurcharge = 0;
-  if ((vehicleType === 'mini_truck' || vehicleType === 'large_truck') && weightKg > 100) {
+  if ((vehicleType === 'mini_truck' || vehicleType === 'large_truck' || vehicleType === 'ace' || vehicleType === 'truck') && weightKg > 100) {
     weightSurcharge = (weightKg - 100) * 0.5;
   }
 

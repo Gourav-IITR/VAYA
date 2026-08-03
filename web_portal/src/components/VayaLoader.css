@@ -1,0 +1,185 @@
+/* VAYA Branded Loader CSS — Production Spec */
+
+:root {
+  --vaya-saffron: #F26430;
+  --vaya-saffron-hover: #D84E1B;
+  --vaya-ink: #0E0E0C;
+  --vaya-cream: #F4EFE6;
+  --vaya-slate: #3C3A34;
+  --vaya-fog: #E4DFD6;
+  --vaya-green: #116E45;
+}
+
+/* Vehicle Wheel Rotation */
+.vaya-wheels {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vaya-wheel-spin 0.5s linear infinite;
+}
+
+/* Keyframe Animations */
+@keyframes vaya-vehicle-travel {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  70% {
+    offset-distance: 100%;
+    opacity: 1;
+  }
+  82% {
+    offset-distance: 100%;
+    opacity: 1;
+  }
+  92% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+  100% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+}
+
+@keyframes vaya-route-reveal {
+  0% {
+    stroke-dashoffset: var(--vaya-route-len, 180);
+  }
+  70% {
+    stroke-dashoffset: 0;
+  }
+  82% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes vaya-wheel-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vaya-node-pulse {
+  0%, 100% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
+@keyframes vaya-pickup-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  8% {
+    transform: scale(1.18);
+  }
+  16% {
+    transform: scale(1);
+  }
+}
+
+@keyframes vaya-drop-pulse {
+  0%, 55% {
+    transform: scale(1);
+  }
+  68% {
+    transform: scale(1.25);
+  }
+  82% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes vaya-vmark-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes vaya-reduced-crossfade {
+  0%, 100% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 0.35;
+  }
+  55% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes vaya-inline-chevron {
+  0% {
+    stroke-dashoffset: 30;
+    opacity: 0.15;
+  }
+  60% {
+    stroke-dashoffset: 0;
+    opacity: 0.55;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.15;
+  }
+}
+
+@keyframes vaya-message-breath {
+  0%, 100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes vaya-fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Screen Reader Only Utility */
+.vaya-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Reduced Motion Overrides */
+@media (prefers-reduced-motion: reduce) {
+  .vaya-vehicle,
+  .vaya-wheels {
+    animation: none !important;
+  }
+
+  [data-vaya-loader] .vaya-wheels {
+    animation: vaya-reduced-crossfade 2.6s ease-in-out infinite !important;
+  }
+}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
 import VayaLogo from './components/VayaLogo';
+import VayaLoader from './components/VayaLoader';
 import { onAuthChange, logoutAdmin } from './shared/firebaseAuth';
 import { LogOut, Monitor } from 'lucide-react';
 
@@ -41,19 +42,12 @@ export default function App() {
 
   if (isInitializing) {
     return (
-      <div style={{
-        display: 'flex', justifyContent: 'center', alignItems: 'center',
-        height: '100vh', width: '100vw', backgroundColor: '#F4EFE6', color: '#0E0E0C'
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-          <div style={{
-            width: '28px', height: '28px', border: '3px solid #0E0E0C',
-            borderTopColor: '#F26430', borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }} />
-          <span style={{ fontSize: '13px', fontWeight: 600, color: '#3C3A34' }}>Verifying VAYA Operations...</span>
-        </div>
-      </div>
+      <VayaLoader
+        variant="fullscreen"
+        size="lg"
+        message="Verifying VAYA Operations..."
+        accessibleLabel="Verifying VAYA session"
+      />
     );
   }
 

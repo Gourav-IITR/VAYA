@@ -22,10 +22,8 @@ export const evaluateDriverAccountStatus = async (driverId) => {
 
   let nextStatus = 'active';
 
-  if (dues > limit * 2) {
-    nextStatus = 'trip_paused'; // Escalation Stage 3: High negative balance -> Pause all trip allocations
-  } else if (dues > limit || (dueDate && now > dueDate)) {
-    nextStatus = 'cash_restricted'; // Escalation Stage 2: Over limit or past due date -> Block cash orders
+  if (dues >= limit) {
+    nextStatus = 'trip_paused'; // Hard block: dues at or above ₹500 → driver must clear dues to continue
   }
 
   if (nextStatus !== driver.account_status) {
@@ -56,6 +54,12 @@ router.get('/driver', verifyToken, async (req, res) => {
       [uid]
     );
 
+    const entries = ledgerRes.rows.map((row) => ({
+      ...row,
+      amount: parseFloat(row.amount || 0),
+      balance_after: parseFloat(row.balance_after || 0)
+    }));
+
     res.json({
       success: true,
       summary: {
@@ -65,7 +69,7 @@ router.get('/driver', verifyToken, async (req, res) => {
         accountStatus: driverInfo.account_status || 'active',
         duesDueDate: driverInfo.dues_due_date
       },
-      entries: ledgerRes.rows
+      entries
     });
   } catch (err) {
     console.error('GET /api/ledger/driver error:', err);

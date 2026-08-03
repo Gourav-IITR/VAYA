@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Front single wheel -->
+  <rect x="90" y="19" width="20" height="30" rx="6" fill="#1F2126"/>
+  <rect x="94" y="23" width="12" height="22" rx="4" fill="#8B8E94"/>
+
+  <!-- Cab -->
+  <rect x="65" y="44" width="70" height="66" rx="10" fill="#2E3138"/>
+  <rect x="65" y="44" width="70" height="10" rx="6" fill="#F5801E"/>
+  <rect x="72" y="52" width="24" height="30" rx="4" fill="#4A4D55"/>
+  <rect x="104" y="52" width="24" height="30" rx="4" fill="#4A4D55"/>
+  <text x="100" y="102" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="20" fill="#FFFFFF" text-anchor="middle">V</text>
+
+  <!-- Cargo bed -->
+  <rect x="55" y="112" width="90" height="56" rx="6" fill="#F5801E"/>
+  <rect x="55" y="123" width="90" height="4" fill="#D9691A"/>
+  <rect x="55" y="136" width="90" height="4" fill="#D9691A"/>
+  <rect x="55" y="149" width="90" height="4" fill="#D9691A"/>
+
+  <!-- Rear wheels -->
+  <rect x="39" y="151" width="16" height="30" rx="5" fill="#1F2126"/>
+  <rect x="145" y="151" width="16" height="30" rx="5" fill="#1F2126"/>
+</svg>

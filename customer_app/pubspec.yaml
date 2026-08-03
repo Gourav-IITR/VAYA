@@ -1,7 +1,7 @@
 name: customer_app
 description: "VAYA - Vehicle at Your Address Customer Mobile Application"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.12+13
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -23,6 +23,12 @@ dependencies:
   web_socket_channel: ^3.0.1
   url_launcher: ^6.3.1
   flutter_local_notifications: ^18.0.1
+  flutter_contacts: ^1.1.9
+  shared_preferences: ^2.3.2
+  speech_to_text: ^7.3.0
+  flutter_tts: ^4.2.5
+  flutter_svg: ^2.0.10+1
+  razorpay_flutter_customui: ^1.4.4
 
 dev_dependencies:
   flutter_test:
@@ -32,3 +38,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  assets:
+    - assets/images/
+    - assets/icons/

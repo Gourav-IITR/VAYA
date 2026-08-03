@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { loginWithEmail, logoutAdmin } from '../shared/firebaseAuth';
 import VayaLogo from './VayaLogo';
+import VayaLoader from './VayaLoader';
 import { Lock, Mail } from 'lucide-react';
 
 export default function AdminLogin({ onLoginSuccess }) {
@@ -128,11 +129,10 @@ export default function AdminLogin({ onLoginSuccess }) {
             }}
           >
             {isLoading ? (
-              <span className="spinner" style={{
-                width: '16px', height: '16px', border: '2px solid #fff',
-                borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block',
-                animation: 'spin 1s linear infinite'
-              }} />
+              <>
+                Signing In
+                <VayaLoader variant="inline" accessibleLabel="Signing in to dashboard" />
+              </>
             ) : (
               'Sign In to Dashboard'
             )}

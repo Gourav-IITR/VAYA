@@ -6,15 +6,25 @@ import { auth } from '../config/firebase.js';
 
 const router = express.Router();
 
-// GET /api/customer/me - Get current customer profile
+// GET /api/customer/me - Get current customer profile (Auto-creates customer if missing)
 router.get('/me', verifyToken, async (req, res) => {
   try {
     const uid = req.user.uid;
-    const result = await query('SELECT * FROM customers WHERE id = $1', [uid]);
-    if (result.rows.length > 0) {
-      return res.json({ exists: true, customer: result.rows[0] });
+    let result = await query('SELECT * FROM customers WHERE id = $1', [uid]);
+    if (result.rows.length === 0) {
+      const phone = (req.user.phone_number && req.user.phone_number.trim().length > 0)
+        ? req.user.phone_number.trim()
+        : (req.user.email || `+91${Math.floor(6000000000 + Math.random() * 3999999999)}`);
+      const name = req.user.name || 'VAYA Customer';
+      result = await query(
+        `INSERT INTO customers (id, phone, name)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+         RETURNING *`,
+        [uid, phone, name]
+      );
     }
-    return res.json({ exists: false });
+    return res.json({ exists: true, customer: result.rows[0] });
   } catch (err) {
     console.error('GET /api/customer/me error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -51,12 +61,12 @@ router.post(
 
     try {
       const uid = req.user.uid;
-      const phone = req.user.phone_number; // Derived securely from Firebase token
+      const phone = (req.user.phone_number && req.user.phone_number.trim().length > 0)
+        ? req.user.phone_number.trim()
+        : (req.body.phone && req.body.phone.trim().length > 0
+          ? req.body.phone.trim()
+          : `+91${Math.floor(6000000000 + Math.random() * 3999999999)}`);
       const { name, fcmToken } = req.body;
-
-      if (!phone) {
-        return res.status(400).json({ error: 'Firebase user has no verified phone number.' });
-      }
 
       // Upsert query
       const upsertQuery = `

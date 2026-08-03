@@ -1,16 +1,21 @@
-# Node.js
+# ══════════════════════════════════════════════
+# VAYA GoodsDeliveryApp — .gitignore
+# ══════════════════════════════════════════════
+
+# ── Node.js ──────────────────────────────────
 **/node_modules/
 **/dist/
 **/.env
 **/.env.*
 **/*.log
+npm-debug.log*
 .node/
 
-# macOS
+# ── macOS ────────────────────────────────────
 .DS_Store
 **/.DS_Store
 
-# IDEs
+# ── IDEs / Editors ───────────────────────────
 .idea/
 .vscode/
 *.suo
@@ -19,19 +24,38 @@
 *.sln
 *.sw?
 
-# Flutter / Dart
-**/.dart-tool/
+# ── Flutter / Dart ───────────────────────────
+**/.dart_tool/
 **/build/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
 **/generated_plugin_registrant.dart
 
-# Private / Secrets keys
+# ── Android Gradle Build Cache ───────────────
+**/.gradle/
+**/.cxx/
+**/local.properties
+
+# ── Build Output Artifacts ───────────────────
+apks/
+aabs/
+
+# ── Firebase Local Emulator / Cache ──────────
+.firebase/
+.firebaserc
+
+# ── Private / Secrets / Keys ─────────────────
 **/serviceAccountKey.json
 **/google-services.json
 **/key.properties
 **/*.jks
 **/*.keystore
+
+# ── Scratch / Temp / Download Artifacts ──────
 temp/
 downloads
 appDeployment
+scratch/
+
+# ── Web Guidelines Cache ────────────────────
+.modern_web_guidelines.md

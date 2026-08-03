@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Front wheel -->
+  <ellipse cx="100" cy="42" rx="11" ry="20" fill="#1F2126"/>
+  <ellipse cx="100" cy="42" rx="6" ry="14" fill="#F5801E"/>
+  <ellipse cx="100" cy="42" rx="3" ry="8" fill="#1F2126"/>
+
+  <!-- Handlebar -->
+  <rect x="70" y="27" width="60" height="8" rx="4" fill="#2E3138"/>
+  <!-- Front fork -->
+  <rect x="96" y="33" width="8" height="20" rx="4" fill="#2E3138"/>
+
+  <!-- Frame / tank -->
+  <path d="M 82 54 Q 100 47 118 54 L 122 96 Q 100 106 78 96 Z" fill="#2E3138"/>
+
+  <!-- Seat -->
+  <rect x="85" y="96" width="30" height="34" rx="10" fill="#F5801E"/>
+
+  <!-- Lower frame -->
+  <rect x="90" y="118" width="20" height="22" fill="#2E3138"/>
+
+  <!-- Rear wheel -->
+  <ellipse cx="100" cy="150" rx="11" ry="20" fill="#1F2126"/>
+  <ellipse cx="100" cy="150" rx="6" ry="14" fill="#F5801E"/>
+  <ellipse cx="100" cy="150" rx="3" ry="8" fill="#1F2126"/>
+
+  <!-- Delivery box -->
+  <rect x="60" y="150" width="80" height="42" rx="7" fill="#F5801E"/>
+  <rect x="60" y="150" width="80" height="10" rx="7" fill="#D9691A"/>
+  <text x="100" y="181" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="24" fill="#FFFFFF" text-anchor="middle">V</text>
+</svg>
