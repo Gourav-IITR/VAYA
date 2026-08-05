@@ -241,12 +241,6 @@ export default function AdminDashboard({ adminUser }) {
             } catch (e) {}
           }
         };
-            setPricingConfig(formatted);
-            try {
-              localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
-            } catch (e) {}
-          }
-        };
 
         ws.onclose = () => {
           setTimeout(connectWs, 3000); // Reconnect
@@ -607,17 +601,67 @@ export default function AdminDashboard({ adminUser }) {
                             />
                           </div>
                         </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '4px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0' }}>
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Pickup Wait (mins)</label>
+                            <input 
+                              type="number" 
+                              min="0"
+                              value={item.free_wait_minutes_pickup ?? 10}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, free_wait_minutes_pickup: val === '' ? '' : parseInt(val) || 0 } : p));
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Dropoff Wait (mins)</label>
+                            <input 
+                              type="number" 
+                              min="0"
+                              value={item.free_wait_minutes_dropoff ?? 10}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, free_wait_minutes_dropoff: val === '' ? '' : parseInt(val) || 0 } : p));
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Charge / Min (₹)</label>
+                            <input 
+                              type="number" 
+                              step="0.5"
+                              min="0"
+                              value={item.wait_charge_per_minute ?? 2.0}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, wait_charge_per_minute: val === '' ? '' : parseFloat(val) || 0 } : p));
+                              }}
+                            />
+                          </div>
+                        </div>
                       </div>
-                    {/* Waiting Time Charges Card */}
+                    ))}
+
+                    {/* Waiting Time Charges Bulk Update Card */}
                     <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid #fde68a', background: '#fffbeb', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Clock size={16} style={{ color: '#d97706' }} />
                         <span style={{ fontWeight: 'bold', color: '#92400e', fontSize: '13px' }}>
-                          Waiting Time Charges Configuration
+                          Bulk Set Waiting Time Charges (All Vehicles)
                         </span>
                       </div>
                       <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
-                        Drivers get free waiting time at pickup and drop-off. Standard per-minute charges apply after free minutes expire.
+                        Quickly set uniform free waiting minutes and per-minute charges across all vehicle classes.
                       </p>
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>

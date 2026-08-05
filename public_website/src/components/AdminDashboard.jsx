@@ -31,10 +31,10 @@ const apiBaseUrl = getApiBaseUrl();
 const wsBaseUrl = getWsBaseUrl();
 
 const defaultPricing = [
-  { vehicle_type: 'bike', base_price: 40, base_distance: 2, per_km_price: 10, description: 'Quick deliveries up to 20 kg' },
-  { vehicle_type: 'three_wheeler', base_price: 120, base_distance: 3, per_km_price: 18, description: 'Medium cargo up to 150 kg' },
-  { vehicle_type: 'ace', base_price: 250, base_distance: 5, per_km_price: 25, description: 'Heavy cargo up to 600 kg' },
-  { vehicle_type: 'truck', base_price: 500, base_distance: 5, per_km_price: 35, description: 'Very heavy cargo up to 2,000 kg' },
+  { vehicle_type: 'bike', base_price: 40, base_distance: 2, per_km_price: 10, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Quick deliveries up to 20 kg' },
+  { vehicle_type: 'three_wheeler', base_price: 120, base_distance: 3, per_km_price: 18, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Medium cargo up to 150 kg' },
+  { vehicle_type: 'ace', base_price: 250, base_distance: 5, per_km_price: 25, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Heavy cargo up to 600 kg' },
+  { vehicle_type: 'truck', base_price: 500, base_distance: 5, per_km_price: 35, free_wait_minutes_pickup: 10, free_wait_minutes_dropoff: 10, wait_charge_per_minute: 2, description: 'Very heavy cargo up to 2,000 kg' },
 ];
 
 const loadCachedPricing = () => {
@@ -119,6 +119,9 @@ export default function AdminDashboard({ adminUser }) {
           base_price: Number(item.base_price),
           base_distance: Number(item.base_distance),
           per_km_price: Number(item.per_km_price),
+          free_wait_minutes_pickup: Number(item.free_wait_minutes_pickup ?? 10),
+          free_wait_minutes_dropoff: Number(item.free_wait_minutes_dropoff ?? 10),
+          wait_charge_per_minute: Number(item.wait_charge_per_minute ?? 2.00),
           description: item.description || ''
         }));
         setPricingConfig(formatted);
@@ -135,14 +138,17 @@ export default function AdminDashboard({ adminUser }) {
 
   const handleUpdatePricing = async (e) => {
     e.preventDefault();
-    if (!window.confirm('Save these live delivery rates?')) return;
+    if (!window.confirm('Save these live delivery rates & waiting charges?')) return;
     try {
       const token = await adminUser.getIdToken();
       const payload = pricingConfig.map(p => ({
         vehicle_type: p.vehicle_type,
         base_price: parseFloat(p.base_price) || 0,
         base_distance: parseFloat(p.base_distance) || 0,
-        per_km_price: parseFloat(p.per_km_price) || 0
+        per_km_price: parseFloat(p.per_km_price) || 0,
+        free_wait_minutes_pickup: parseInt(p.free_wait_minutes_pickup) || 0,
+        free_wait_minutes_dropoff: parseInt(p.free_wait_minutes_dropoff) || 0,
+        wait_charge_per_minute: parseFloat(p.wait_charge_per_minute) || 0
       }));
 
       // Instantly save to local state and localStorage for instant UI feedback
@@ -168,6 +174,9 @@ export default function AdminDashboard({ adminUser }) {
           base_price: Number(item.base_price),
           base_distance: Number(item.base_distance),
           per_km_price: Number(item.per_km_price),
+          free_wait_minutes_pickup: Number(item.free_wait_minutes_pickup ?? 10),
+          free_wait_minutes_dropoff: Number(item.free_wait_minutes_dropoff ?? 10),
+          wait_charge_per_minute: Number(item.wait_charge_per_minute ?? 2.00),
           description: item.description || ''
         }));
         setPricingConfig(formatted);
@@ -589,11 +598,120 @@ export default function AdminDashboard({ adminUser }) {
                             />
                           </div>
                         </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '4px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0' }}>
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Pickup Wait (mins)</label>
+                            <input 
+                              type="number" 
+                              min="0"
+                              value={item.free_wait_minutes_pickup ?? 10}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, free_wait_minutes_pickup: val === '' ? '' : parseInt(val) || 0 } : p));
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Dropoff Wait (mins)</label>
+                            <input 
+                              type="number" 
+                              min="0"
+                              value={item.free_wait_minutes_dropoff ?? 10}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, free_wait_minutes_dropoff: val === '' ? '' : parseInt(val) || 0 } : p));
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Charge / Min (₹)</label>
+                            <input 
+                              type="number" 
+                              step="0.5"
+                              min="0"
+                              value={item.wait_charge_per_minute ?? 2.0}
+                              className="form-input"
+                              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPricingConfig(prev => prev.map((p, i) => i === index ? { ...p, wait_charge_per_minute: val === '' ? '' : parseFloat(val) || 0 } : p));
+                              }}
+                            />
+                          </div>
+                        </div>
                       </div>
                     ))}
 
+                    {/* Waiting Time Charges Bulk Update Card */}
+                    <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid #fde68a', background: '#fffbeb', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Clock size={16} style={{ color: '#d97706' }} />
+                        <span style={{ fontWeight: 'bold', color: '#92400e', fontSize: '13px' }}>
+                          Bulk Set Waiting Time Charges (All Vehicles)
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
+                        Quickly set uniform free waiting minutes and per-minute charges across all vehicle classes.
+                      </p>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Pickup Wait (mins)</label>
+                          <input 
+                            type="number" 
+                            min="0"
+                            value={pricingConfig[0]?.free_wait_minutes_pickup ?? 10}
+                            className="form-input"
+                            style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPricingConfig(prev => prev.map(p => ({ ...p, free_wait_minutes_pickup: val === '' ? '' : parseInt(val) || 0 })));
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Free Dropoff Wait (mins)</label>
+                          <input 
+                            type="number" 
+                            min="0"
+                            value={pricingConfig[0]?.free_wait_minutes_dropoff ?? 10}
+                            className="form-input"
+                            style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPricingConfig(prev => prev.map(p => ({ ...p, free_wait_minutes_dropoff: val === '' ? '' : parseInt(val) || 0 })));
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#92400e', display: 'block', marginBottom: '4px' }}>Charge / Minute (₹)</label>
+                          <input 
+                            type="number" 
+                            step="0.5"
+                            min="0"
+                            value={pricingConfig[0]?.wait_charge_per_minute ?? 2.0}
+                            className="form-input"
+                            style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPricingConfig(prev => prev.map(p => ({ ...p, wait_charge_per_minute: val === '' ? '' : parseFloat(val) || 0 })));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 20px', fontSize: '13px' }}>
-                      Save Live Rates
+                      Save Live Rates & Waiting Charges
                     </button>
                   </form>
                 )}

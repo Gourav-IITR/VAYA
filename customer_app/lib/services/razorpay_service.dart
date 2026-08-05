@@ -140,8 +140,8 @@ class RazorpayPaymentService {
             ? 'Delivery Booking Payment'
             : (purpose == 'dues_repayment' ? 'Driver Dues Repayment' : 'Wallet Top-up'),
         'prefill': {
-          'contact': cleanPhone.isNotEmpty ? cleanPhone : '9876543210',
-          'name': userName.isNotEmpty ? userName : 'VAYA Customer',
+          'contact': cleanPhone,
+          'name': userName,
         },
       };
 

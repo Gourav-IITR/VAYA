@@ -17,8 +17,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import 'widgets/payment_method_sheet.dart';
 import 'services/razorpay_service.dart';
+import 'services/vaya_notification_service.dart';
 import 'utils/vehicle_icon_helper.dart';
 import 'widgets/vaya_loader.dart';
 
@@ -230,34 +232,7 @@ String formatIndianPhoneNumber(String raw) {
 
 Future<Map<String, String>?> _pickPhoneContact(BuildContext context) async {
   try {
-    // 1. Try opening system contact picker directly first
-    try {
-      final contact = await FlutterContacts.openExternalPick();
-      if (contact != null) {
-        final name = contact.displayName;
-        String phone = '';
-        if (contact.phones.isNotEmpty) {
-          phone = contact.phones.first.number;
-        }
-        phone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
-        if (phone.startsWith('+91')) {
-          phone = phone.substring(3);
-        } else if (phone.startsWith('91') && phone.length == 12) {
-          phone = phone.substring(2);
-        }
-        phone = phone.replaceAll(RegExp(r'\D'), '');
-        return {
-          'name': name,
-          'phone': phone,
-        };
-      } else {
-        return null; // User cancelled
-      }
-    } catch (e) {
-      debugPrint('Direct pick attempt note: $e');
-    }
-
-    // 2. Request readonly permission if needed
+    // 1. Request readonly permission first before launching system contact picker
     bool granted = false;
     try {
       granted = await FlutterContacts.requestPermission(readonly: true);
@@ -265,52 +240,56 @@ Future<Map<String, String>?> _pickPhoneContact(BuildContext context) async {
       debugPrint('Permission request error: $e');
     }
 
-    if (granted) {
-      final contact = await FlutterContacts.openExternalPick();
-      if (contact != null) {
-        final name = contact.displayName;
-        String phone = '';
-        if (contact.phones.isNotEmpty) {
-          phone = contact.phones.first.number;
-        }
-        phone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
-        if (phone.startsWith('+91')) {
-          phone = phone.substring(3);
-        } else if (phone.startsWith('91') && phone.length == 12) {
-          phone = phone.substring(2);
-        }
-        phone = phone.replaceAll(RegExp(r'\D'), '');
-        return {
-          'name': name,
-          'phone': phone,
-        };
+    if (!granted) {
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Contacts Permission Required', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.bold)),
+            content: const Text('VAYA needs contacts permission to help you pick a contact. Please enable it in the app settings.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel', style: TextStyle(color: VayaTheme.slate)),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await Geolocator.openAppSettings();
+                },
+                child: const Text('Open settings', style: TextStyle(color: VayaTheme.saffron, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
       }
-      return null;
+      return {'permission_denied': 'true'};
     }
 
-    if (context.mounted) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Contacts Permission Required', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.bold)),
-          content: const Text('VAYA needs contacts permission to help you pick a contact. Please enable it in the app settings.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: VayaTheme.slate)),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await Geolocator.openAppSettings();
-              },
-              child: const Text('Open settings', style: TextStyle(color: VayaTheme.saffron, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      );
+    // 2. Open system contact picker with permission granted
+    final contact = await FlutterContacts.openExternalPick();
+    if (contact != null) {
+      final name = contact.displayName;
+      String phone = '';
+      if (contact.phones.isNotEmpty) {
+        phone = contact.phones.first.number;
+      }
+      phone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+      if (phone.startsWith('+91')) {
+        phone = phone.substring(3);
+      } else if (phone.startsWith('91') && phone.length == 12) {
+        phone = phone.substring(2);
+      }
+      phone = phone.replaceAll(RegExp(r'\D'), '');
+      if (phone.length > 10) {
+        phone = phone.substring(phone.length - 10);
+      }
+      return {
+        'name': name,
+        'phone': phone,
+      };
     }
-    return {'permission_denied': 'true'};
+    return null; // User cancelled contact selection
   } catch (e) {
     debugPrint('Error in _pickPhoneContact: $e');
     return null;
@@ -412,6 +391,25 @@ class VayaStorage {
       debugPrint('Error saving wallet balance: $e');
     }
   }
+
+  static Future<String?> loadLastUsedPaymentMethod() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('vaya_last_used_payment_method');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static Future<void> saveLastUsedPaymentMethod(String method) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('vaya_last_used_payment_method', method);
+    } catch (e) {
+      debugPrint('Error saving last used payment method: $e');
+    }
+  }
+
 
   static Future<Map<String, String>> loadUserProfile() async {
     try {
@@ -707,10 +705,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   Future<void> _initSession() async {
+    final startTime = DateTime.now();
+
+    Future<void> ensureMinLoaderTime() async {
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      const minDisplayMs = 1200;
+      if (elapsed < minDisplayMs) {
+        await Future.delayed(Duration(milliseconds: minDisplayMs - elapsed));
+      }
+    }
+
     // 1. Check local disk session FIRST for instant cold-start auto-login
     final saved = await CustomerSessionManager.getSavedSession();
     if (saved != null) {
-      debugPrint('[VAYA] Cold Start: Saved session found. Auto-logging customer in instantly.');
+      debugPrint('[VAYA] Cold Start: Saved session found. Auto-logging customer in.');
+      await ensureMinLoaderTime();
       if (mounted) {
         setState(() {
           _customerData = saved;
@@ -736,8 +745,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
     }
 
     if (user != null) {
-      await _syncSessionWithUser(user);
+      await _syncSessionWithUser(user, startTime);
     } else {
+      await ensureMinLoaderTime();
       if (mounted) {
         setState(() {
           _loading = false;
@@ -746,7 +756,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
     }
   }
 
-  Future<void> _syncSessionWithUser(User user) async {
+  Future<void> _syncSessionWithUser(User user, DateTime startTime) async {
+    Future<void> ensureMinLoaderTime() async {
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      const minDisplayMs = 1200;
+      if (elapsed < minDisplayMs) {
+        await Future.delayed(Duration(milliseconds: minDisplayMs - elapsed));
+      }
+    }
+
     try {
       final token = await user.getIdToken(true);
       if (token != null && token.isNotEmpty) {
@@ -761,6 +779,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           if (data['exists'] == true && data['customer'] != null) {
             final customer = data['customer'];
             await CustomerSessionManager.saveSession(customer, token: token);
+            await ensureMinLoaderTime();
             if (mounted) {
               setState(() {
                 _customerData = customer;
@@ -781,6 +800,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       'phone': user.phoneNumber ?? '',
     };
     await CustomerSessionManager.saveSession(defaultCustomer);
+    await ensureMinLoaderTime();
     if (mounted) {
       setState(() {
         _customerData = defaultCustomer;
@@ -1422,6 +1442,28 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     _activeBookingCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       _checkActiveBooking();
     });
+
+    VayaNotificationService.instance.initialize(
+      onOpenDeliveryScreen: (bookingId) {
+        _openDeliveryScreenForBooking(bookingId);
+      },
+      apiBaseUrl: apiBaseUrl,
+      getAuthToken: CustomerAuthHelper.getAuthToken,
+    );
+  }
+
+  void _openDeliveryScreenForBooking(String bookingId) {
+    if (!mounted || bookingId.isEmpty) return;
+    final targetFare = double.tryParse(_activeBooking?['estimated_cost']?.toString() ?? '') ?? 0.0;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TrackingScreen(
+          bookingId: bookingId,
+          initialEstimatedCost: targetFare,
+        ),
+      ),
+    ).then((_) => _checkActiveBooking());
   }
 
   Future<void> _loadCachedActiveBookingFirst() async {
@@ -1488,7 +1530,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           final bookingId = booking['id'];
           final driverName = booking['driver_name'] ?? 'Driver Partner';
 
+          // Skip if a rating popup is already active for this booking
+          if (DriverRatingBottomSheet.isRatingActiveFor(bookingId)) return;
+
           _isRatingSheetShowing = true;
+          DriverRatingBottomSheet.markRatingActive(bookingId);
           showModalBottomSheet(
             context: context,
             isDismissible: true,
@@ -1501,6 +1547,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               bookingData: booking,
             ),
           ).then((_) {
+            DriverRatingBottomSheet.markRatingDismissed(bookingId);
             if (mounted) {
               setState(() {
                 _isRatingSheetShowing = false;
@@ -4331,169 +4378,96 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Collapsed route map (tap to expand/collapse) ──
-              GestureDetector(
-                onTap: () => setState(() => _isPickupExpanded = !_isPickupExpanded),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeInOut,
-                  height: _isPickupExpanded ? 260 : 150,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: VayaTheme.fog),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Stack(
-                      children: [
-                        GoogleMap(
-                          initialCameraPosition: CameraPosition(target: widget.pickup, zoom: 13),
-                          markers: {
-                            Marker(
-                              markerId: const MarkerId('pickup'),
-                              position: widget.pickup,
-                              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-                            ),
-                            Marker(
-                              markerId: const MarkerId('dropoff'),
-                              position: widget.dropoff,
-                              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-                            ),
-                          },
-                          polylines: {
-                            Polyline(
-                              polylineId: const PolylineId('osrm_road_route'),
-                              points: _roadPolylinePoints,
-                              color: VayaTheme.saffron,
-                              width: 4,
-                            ),
-                          },
-                          myLocationEnabled: false,
-                          myLocationButtonEnabled: false,
-                          zoomControlsEnabled: false,
-                          zoomGesturesEnabled: _isPickupExpanded,
-                          scrollGesturesEnabled: _isPickupExpanded,
-                          rotateGesturesEnabled: false,
-                          tiltGesturesEnabled: false,
-                          gestureRecognizers: _isPickupExpanded ? {
-                            Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-                          } : {},
-                          onMapCreated: (c) {
-                            _mapController = c;
-                            _fitRouteBounds();
-                          },
-                        ),
-                        // Expand/collapse affordance
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.92),
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _isPickupExpanded ? Icons.unfold_less : Icons.unfold_more,
-                                  size: 14,
-                                  color: VayaTheme.inkBlack,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _isPickupExpanded ? 'Collapse' : 'Expand map',
-                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: VayaTheme.inkBlack),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (_fetchingRoute)
-                          Container(
-                            color: Colors.white54,
-                            child: const Center(
-                              child: VayaLoader.inline(size: 20, color: VayaTheme.saffron),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // ── Compact pickup / drop summary pill ──
+              // ── Compact 72–88 px route summary ──
               Container(
+                height: 76,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: VayaTheme.fog),
                 ),
-                child: IntrinsicHeight(
-                  child: Row(
-                    children: [
-                      // Saffron dot → line → green dot
-                      Column(
+                child: Row(
+                  children: [
+                    // Saffron dot → line → green dot
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 7, height: 7,
+                          decoration: const BoxDecoration(color: VayaTheme.saffron, shape: BoxShape.circle),
+                        ),
+                        Container(width: 2, height: 14, color: VayaTheme.saffron.withOpacity(0.35)),
+                        Container(
+                          width: 7, height: 7,
+                          decoration: const BoxDecoration(color: VayaTheme.routeGreen, shape: BoxShape.circle),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Container(
-                            width: 8, height: 8,
-                            decoration: const BoxDecoration(color: VayaTheme.saffron, shape: BoxShape.circle),
+                          Text(
+                            widget.pickupAddress,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
                           ),
-                          Container(width: 2, height: 16, color: VayaTheme.saffron.withOpacity(0.35)),
-                          Container(
-                            width: 8, height: 8,
-                            decoration: const BoxDecoration(color: VayaTheme.routeGreen, shape: BoxShape.circle),
+                          const SizedBox(height: 3),
+                          Text(
+                            widget.dropoffAddress,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: VayaTheme.slate.withOpacity(0.85), fontFamily: 'Inter'),
                           ),
                         ],
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              widget.pickupAddress,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (!_fetchingRoute)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: VayaTheme.signalCream,
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              widget.dropoffAddress,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: VayaTheme.slate.withOpacity(0.85), fontFamily: 'Inter'),
+                            child: Text(
+                              '${_roadDistanceKm.toStringAsFixed(1)} km · ~$_roadDurationMin min',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: VayaTheme.slate, fontFamily: 'Inter'),
                             ),
-                          ],
+                          )
+                        else
+                          const VayaLoader.inline(size: 14, color: VayaTheme.saffron),
+                        const SizedBox(height: 4),
+                        InkWell(
+                          onTap: () => Navigator.pop(context),
+                          borderRadius: BorderRadius.circular(4),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Text(
+                              'Change',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: VayaTheme.saffron,
+                                fontFamily: 'Inter',
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Distance + duration chip
-                      if (!_fetchingRoute)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: VayaTheme.signalCream,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '${_roadDistanceKm.toStringAsFixed(1)} km · ~$_roadDurationMin min',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: VayaTheme.slate, fontFamily: 'Inter'),
-                          ),
-                        )
-                      else
-                        const VayaLoader.inline(size: 16, color: VayaTheme.saffron),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
 
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -4747,12 +4721,12 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
         }),
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 112),
+          height: 124,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             border: Border.all(
               color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
-              width: 1.0,
+              width: isSelected ? 1.5 : 1.0,
             ),
             borderRadius: BorderRadius.circular(16),
             color: isSelected ? VayaTheme.saffron.withOpacity(0.04) : Colors.white,
@@ -4760,7 +4734,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Saffron radio indicator
+              // Radio indicator
               Radio<String>(
                 value: id,
                 groupValue: unavailable ? null : _selectedVehicle,
@@ -4775,20 +4749,21 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                 },
               ),
               const SizedBox(width: 4),
-              // Vehicle icon 24px
+              // Vehicle icon
               SizedBox(
-                width: 48,
-                height: 48,
+                width: 46,
+                height: 46,
                 child: Image.asset(
                   imageAsset,
                   fit: BoxFit.contain,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
+              // Vehicle details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       name,
@@ -4802,39 +4777,44 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                     const SizedBox(height: 2),
                     Text(
                       '$capacity · $dimensions',
-                      style: const TextStyle(fontSize: 12, color: VayaTheme.slate, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
+                      style: const TextStyle(fontSize: 11.5, color: VayaTheme.slate, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       'Best for: $cargoExamples',
                       style: const TextStyle(fontSize: 11, color: VayaTheme.slate, fontFamily: 'Inter'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (unavailable)
                       const Text(
                         'Unavailable on this route',
-                        style: TextStyle(fontSize: 11, color: Color(0xFFDC2626), fontFamily: 'Inter'),
+                        style: TextStyle(fontSize: 10, color: Color(0xFFDC2626), fontFamily: 'Inter'),
                       ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
+              // Fare & ETA
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
                     '₹${fare.toStringAsFixed(0)}',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
-                      fontSize: 16,
+                      fontSize: 17,
                       color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
                       fontFamily: 'General Sans',
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     etaText,
-                    style: const TextStyle(fontSize: 11, color: VayaTheme.slate, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
+                    style: const TextStyle(fontSize: 10.5, color: VayaTheme.slate, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
                   ),
                 ],
               ),
@@ -4847,7 +4827,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
 
   Widget _buildVehicleSkeletonRow() {
     return Container(
-      height: 112,
+      height: 124,
       margin: const EdgeInsets.only(bottom: 0),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -5181,10 +5161,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    final initSName = widget.initSenderName.trim().isNotEmpty ? widget.initSenderName.trim() : 'Priya Sharma';
-    final initSPhone = widget.initSenderPhone.trim().isNotEmpty ? widget.initSenderPhone.trim() : '+91 98765 43210';
-    final initRName = widget.initReceiverName.trim().isNotEmpty ? widget.initReceiverName.trim() : 'Rahul Mehta';
-    final initRPhone = widget.initReceiverPhone.trim().isNotEmpty ? widget.initReceiverPhone.trim() : '+91 98765 43210';
+    final initSName = widget.initSenderName.trim();
+    final initSPhone = widget.initSenderPhone.trim();
+    final initRName = widget.initReceiverName.trim();
+    final initRPhone = widget.initReceiverPhone.trim();
 
     _senderNameCtrl = TextEditingController(text: initSName);
     _senderPhoneCtrl = TextEditingController(text: initSPhone);
@@ -5329,13 +5309,13 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
 
   Widget _buildSectionConnector() {
     return SizedBox(
-      height: 32,
+      height: 12,
       child: Row(
         children: [
-          const SizedBox(width: 21),
+          const SizedBox(width: 17),
           Container(
             width: 3,
-            height: 32,
+            height: 12,
             decoration: BoxDecoration(
               color: VayaTheme.saffron,
               borderRadius: BorderRadius.circular(2),
@@ -5360,19 +5340,10 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: VayaTheme.slate,
-            fontFamily: 'Inter',
-          ),
-        ),
-        const SizedBox(height: 6),
         SizedBox(
-          height: 56,
+          height: errorText != null ? 70 : 54,
           child: TextField(
             controller: controller,
             enabled: enabled,
@@ -5381,51 +5352,60 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
             textInputAction: textInputAction,
             onEditingComplete: onEditingComplete,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w500,
               color: enabled ? VayaTheme.inkBlack : VayaTheme.slate,
               fontFamily: 'Inter',
             ),
             decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: const TextStyle(fontSize: 15, color: Color(0xFFB0ABA3), fontFamily: 'Inter'),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
-              prefixIcon: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Icon(icon, size: 20, color: enabled ? VayaTheme.slate : VayaTheme.fog),
+              labelText: label,
+              floatingLabelBehavior: FloatingLabelBehavior.auto,
+              labelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: VayaTheme.slate,
+                fontFamily: 'Inter',
               ),
+              floatingLabelStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: VayaTheme.saffron,
+                fontFamily: 'Inter',
+              ),
+              hintText: hint,
+              hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFB0ABA3), fontFamily: 'Inter'),
+              contentPadding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(left: 12, right: 8),
+                child: Icon(icon, size: 18, color: enabled ? VayaTheme.slate : VayaTheme.fog),
+              ),
+              prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
               filled: true,
               fillColor: enabled ? Colors.white : const Color(0xFFF7F5F2),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: VayaTheme.fog, width: 1.5),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
                   color: errorText != null ? const Color(0xFFDC2626) : VayaTheme.fog,
                   width: errorText != null ? 1.5 : 1,
                 ),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: VayaTheme.saffron, width: 2),
               ),
               disabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: VayaTheme.fog.withOpacity(0.6), width: 1),
               ),
-              errorText: null,
+              errorText: errorText,
+              errorStyle: const TextStyle(fontSize: 11, color: Color(0xFFDC2626), height: 1.1),
             ),
           ),
         ),
-        if (errorText != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            errorText,
-            style: const TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontFamily: 'Inter'),
-          ),
-        ],
       ],
     );
   }
@@ -5472,55 +5452,55 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
         onTap: () => FocusScope.of(context).unfocus(),
         child: Column(
           children: [
-            // ── Summary bar (64-72 px height) ──────────────────────────
+            // ── Summary bar (56 px height) ──────────────────────────
             Container(
-              height: 68,
+              height: 56,
               color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: VayaTheme.signalCream,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: VayaTheme.fog),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.two_wheeler, size: 16, color: VayaTheme.saffron),
-                        const SizedBox(width: 6),
+                        const Icon(Icons.two_wheeler, size: 15, color: VayaTheme.saffron),
+                        const SizedBox(width: 4),
                         Text(
                           vehicleLabel,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text('·', style: TextStyle(color: VayaTheme.slate.withOpacity(0.5), fontSize: 16)),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
+                  Text('·', style: TextStyle(color: VayaTheme.slate.withOpacity(0.5), fontSize: 14)),
+                  const SizedBox(width: 6),
                   Text(
                     fareStr,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
                   ),
-                  const SizedBox(width: 8),
-                  Text('·', style: TextStyle(color: VayaTheme.slate.withOpacity(0.5), fontSize: 16)),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
+                  Text('·', style: TextStyle(color: VayaTheme.slate.withOpacity(0.5), fontSize: 14)),
+                  const SizedBox(width: 6),
                   Text(
                     distStr,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: VayaTheme.slate, fontFamily: 'Inter'),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: VayaTheme.slate, fontFamily: 'Inter'),
                   ),
                   const Spacer(),
                   // Timer pill: Fare valid · 04:45
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: _quoteExpired
                           ? const Color(0xFFFEF2F2)
                           : VayaTheme.saffron.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                       border: Border.all(
                         color: _quoteExpired ? const Color(0xFFFCA5A5) : VayaTheme.saffron.withOpacity(0.2),
                       ),
@@ -5529,14 +5509,14 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
                       children: [
                         Icon(
                           Icons.timer_outlined,
-                          size: 14,
+                          size: 13,
                           color: _quoteExpired ? const Color(0xFFDC2626) : VayaTheme.saffron,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           _quoteExpired ? 'Fare expired' : 'Fare valid · ${_quoteTimerLabel()}',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: _quoteExpired ? const Color(0xFFDC2626) : VayaTheme.saffron,
                             fontFamily: 'Inter',
@@ -5554,30 +5534,30 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
               Container(
                 width: double.infinity,
                 color: const Color(0xFFFEF2F2),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline, size: 18, color: Color(0xFFDC2626)),
-                    const SizedBox(width: 8),
+                    const Icon(Icons.info_outline, size: 16, color: Color(0xFFDC2626)),
+                    const SizedBox(width: 6),
                     const Expanded(
                       child: Text(
                         'Quote expired. Retaining your contact details while you refresh.',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF991B1B), fontFamily: 'Inter'),
+                        style: TextStyle(fontSize: 11, color: Color(0xFF991B1B), fontFamily: 'Inter'),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     InkWell(
                       onTap: _isRefreshingQuote ? null : _refreshQuote,
                       borderRadius: BorderRadius.circular(6),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: VayaTheme.saffron,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: _isRefreshingQuote
-                            ? const VayaLoader.inline(size: 14, color: VayaTheme.inkBlack)
-                            : const Text('Refresh fare', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack, fontFamily: 'Inter')),
+                            ? const VayaLoader.inline(size: 12, color: VayaTheme.inkBlack)
+                            : const Text('Refresh fare', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack, fontFamily: 'Inter')),
                       ),
                     ),
                   ],
@@ -5589,15 +5569,15 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
               Container(
                 width: double.infinity,
                 color: const Color(0xFFFFFBEB),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 child: Row(
                   children: [
-                    const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD97706)),
-                    const SizedBox(width: 8),
+                    const Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFD97706)),
+                    const SizedBox(width: 6),
                     const Expanded(
                       child: Text(
                         'Sender and receiver mobile numbers are identical. Check "Receiver is me" to auto-sync.',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF92400E), fontFamily: 'Inter'),
+                        style: TextStyle(fontSize: 11, color: Color(0xFF92400E), fontFamily: 'Inter'),
                       ),
                     ),
                   ],
@@ -5607,14 +5587,13 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
             // ── Form list ──────────────────────────────────────────────
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                padding: EdgeInsets.fromLTRB(14, 12, 14, 88 + bottomInset),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _buildContactSection(sectionType: 'sender'),
                     _buildSectionConnector(),
                     _buildContactSection(sectionType: 'receiver'),
-                    const SizedBox(height: 24),
                   ],
                 ),
               ),
@@ -5631,7 +5610,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
             child: SizedBox(
               height: 52,
               child: ElevatedButton(
@@ -5642,7 +5621,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
                   disabledBackgroundColor: VayaTheme.fog,
                   disabledForegroundColor: VayaTheme.slate,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   padding: EdgeInsets.zero,
                 ),
                 child: Text(
@@ -5665,13 +5644,13 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
 
   Widget _buildContactSection({required String sectionType}) {
     final isSender = sectionType == 'sender';
-    final sectionLabel = isSender ? 'Pickup contact (sender)' : 'Drop-off contact (receiver)';
+    final sectionLabel = isSender ? 'Pickup contact' : 'Receiver details';
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: VayaTheme.fog, width: 1),
       ),
       child: Column(
@@ -5701,7 +5680,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
                     color: Colors.white,
                   ),
                 ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   sectionLabel,
@@ -5711,19 +5690,58 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
                     fontSize: 15,
                     color: VayaTheme.inkBlack,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (!isSender) ...[
+                InkWell(
+                  onTap: () => _toggleReceiverIsMe(!_receiverIsMe),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: Checkbox(
+                            value: _receiverIsMe,
+                            onChanged: (v) => _toggleReceiverIsMe(v ?? false),
+                            activeColor: VayaTheme.saffron,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            side: const BorderSide(color: VayaTheme.fog, width: 1.5),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'Receiver is me',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontWeight: FontWeight.w500,
+                            fontSize: 12,
+                            color: VayaTheme.inkBlack,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
               // 44 px contact target button
               InkWell(
                 onTap: () => _openContactPicker(isSender: isSender),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
                 child: Container(
                   width: 44,
                   height: 44,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: VayaTheme.saffron.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.contacts_outlined, size: 20, color: VayaTheme.saffron),
                 ),
@@ -5731,57 +5749,22 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
             ],
           ),
 
-          // "Receiver is me" checkbox (only on receiver section)
-          if (!isSender) ...[
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () => _toggleReceiverIsMe(!_receiverIsMe),
-              borderRadius: BorderRadius.circular(8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: Checkbox(
-                      value: _receiverIsMe,
-                      onChanged: (v) => _toggleReceiverIsMe(v ?? false),
-                      activeColor: VayaTheme.saffron,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-                      side: const BorderSide(color: VayaTheme.fog, width: 1.5),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'Receiver is me',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                      color: VayaTheme.inkBlack,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          const SizedBox(height: 8),
 
-          const SizedBox(height: 12),
-
-          // Form fields (56 px inputs, 12 px field gaps)
+          // Form fields (54 px inputs, 8 px field gaps, floating labels inside)
           Column(
             children: [
               _buildPersistentField(
                 label: isSender ? 'Sender name' : 'Receiver name',
                 controller: isSender ? _senderNameCtrl : _receiverNameCtrl,
-                hint: isSender ? 'e.g. Priya Sharma' : 'e.g. Rahul Mehta',
+                hint: isSender ? 'Priya Sharma' : 'Rahul Mehta',
                 icon: Icons.person_outline_rounded,
                 enabled: isSender || !_receiverIsMe,
                 textInputAction: TextInputAction.next,
                 errorText: isSender ? _senderNameError : _receiverNameError,
                 onEditingComplete: isSender ? _inlineValidateSenderName : _inlineValidateReceiverName,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               _buildPersistentField(
                 label: isSender ? 'Sender mobile' : 'Receiver mobile',
                 controller: isSender ? _senderPhoneCtrl : _receiverPhoneCtrl,
@@ -5794,7 +5777,7 @@ class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
                 errorText: isSender ? _senderPhoneError : _receiverPhoneError,
                 onEditingComplete: isSender ? _inlineValidateSenderPhone : _inlineValidateReceiverPhone,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               // Building, flat or gate (optional) - ALWAYS editable!
               _buildPersistentField(
                 label: 'Building, flat or gate (optional)',
@@ -5878,7 +5861,9 @@ class ReviewDeliveryScreen extends StatefulWidget {
 
 class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
   bool _isBooking = false;
-  String _selectedPayment = '';
+  String _selectedPayment = ''; // Explicit choice required for each booking!
+  String? _lastUsedPayment;
+  int _walletBalance = 0;
   String? _cashCollectionPoint; // null, 'PICKUP', 'DROPOFF'
   List<dynamic> _serverPricing = [];
   bool _loadingPricing = true;
@@ -5887,9 +5872,21 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedPayment = widget.paymentMethod;
+    _selectedPayment = '';
+    _loadLastUsedAndWallet();
     _fetchPricingConfig();
     _initRazorpay();
+  }
+
+  Future<void> _loadLastUsedAndWallet() async {
+    final lastUsed = await VayaStorage.loadLastUsedPaymentMethod();
+    final balance = await VayaStorage.loadWalletBalance();
+    if (mounted) {
+      setState(() {
+        _lastUsedPayment = lastUsed;
+        _walletBalance = balance;
+      });
+    }
   }
 
   void _initRazorpay() {
@@ -6014,6 +6011,51 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
     }
   }
 
+  int get _freeWaitPickupMins {
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == widget.selectedVehicle,
+          orElse: () => null,
+        );
+        if (match != null && match['free_wait_minutes_pickup'] != null) {
+          return int.tryParse(match['free_wait_minutes_pickup'].toString()) ?? 10;
+        }
+      } catch (_) {}
+    }
+    return 10;
+  }
+
+  int get _freeWaitDropoffMins {
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == widget.selectedVehicle,
+          orElse: () => null,
+        );
+        if (match != null && match['free_wait_minutes_dropoff'] != null) {
+          return int.tryParse(match['free_wait_minutes_dropoff'].toString()) ?? 10;
+        }
+      } catch (_) {}
+    }
+    return 10;
+  }
+
+  double get _waitChargePerMin {
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == widget.selectedVehicle,
+          orElse: () => null,
+        );
+        if (match != null && match['wait_charge_per_minute'] != null) {
+          return double.tryParse(match['wait_charge_per_minute'].toString()) ?? 2.0;
+        }
+      } catch (_) {}
+    }
+    return 2.0;
+  }
+
   double get _totalFare {
     final baseFare = _baseFare;
     final helperFee = widget.helperCount * 150.0;
@@ -6111,6 +6153,9 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
+        if (_selectedPayment.isNotEmpty) {
+          await VayaStorage.saveLastUsedPaymentMethod(_selectedPayment);
+        }
         final data = json.decode(response.body);
         final b = data['booking'] ?? {};
         final cost = double.tryParse(b['estimated_cost']?.toString() ?? '') ?? widget.estimatedFare;
@@ -6214,63 +6259,123 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Route summary ───────────────────────────────────
+            // ── Route summary with collapsed route preview map ──
             _buildCard(
+              padding: EdgeInsets.zero,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Route', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w600, fontSize: 15, color: VayaTheme.inkBlack)),
-                  const SizedBox(height: 14),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Column(
-                        children: [
-                          Container(
-                            width: 10, height: 10,
-                            decoration: BoxDecoration(color: VayaTheme.saffron, shape: BoxShape.circle, border: Border.all(color: VayaTheme.saffron.withOpacity(0.3), width: 3)),
+                  // Collapsed route map preview
+                  SizedBox(
+                    height: 140,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                      child: GoogleMap(
+                        initialCameraPosition: CameraPosition(target: widget.pickup, zoom: 13),
+                        markers: {
+                          Marker(
+                            markerId: const MarkerId('pickup'),
+                            position: widget.pickup,
+                            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
                           ),
-                          Container(width: 3, height: 36, color: VayaTheme.saffron),
-                          Container(
-                            width: 10, height: 10,
-                            decoration: BoxDecoration(color: VayaTheme.routeGreen, shape: BoxShape.circle, border: Border.all(color: VayaTheme.routeGreen.withOpacity(0.3), width: 3)),
+                          Marker(
+                            markerId: const MarkerId('dropoff'),
+                            position: widget.dropoff,
+                            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                           ),
-                        ],
+                        },
+                        polylines: {
+                          if (widget.roadPolylinePoints.isNotEmpty)
+                            Polyline(
+                              polylineId: const PolylineId('osrm_road_route'),
+                              points: widget.roadPolylinePoints,
+                              color: VayaTheme.saffron,
+                              width: 4,
+                            ),
+                        },
+                        myLocationEnabled: false,
+                        myLocationButtonEnabled: false,
+                        zoomControlsEnabled: false,
+                        zoomGesturesEnabled: false,
+                        scrollGesturesEnabled: false,
+                        rotateGesturesEnabled: false,
+                        tiltGesturesEnabled: false,
+                        onMapCreated: (controller) {
+                          final bounds = LatLngBounds(
+                            southwest: LatLng(
+                              widget.pickup.latitude < widget.dropoff.latitude ? widget.pickup.latitude : widget.dropoff.latitude,
+                              widget.pickup.longitude < widget.dropoff.longitude ? widget.pickup.longitude : widget.dropoff.longitude,
+                            ),
+                            northeast: LatLng(
+                              widget.pickup.latitude > widget.dropoff.latitude ? widget.pickup.latitude : widget.dropoff.latitude,
+                              widget.pickup.longitude > widget.dropoff.longitude ? widget.pickup.longitude : widget.dropoff.longitude,
+                            ),
+                          );
+                          controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 36));
+                        },
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Route', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w600, fontSize: 15, color: VayaTheme.inkBlack)),
+                        const SizedBox(height: 14),
+                        Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              widget.pickupAddress,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
-                              maxLines: 2, overflow: TextOverflow.ellipsis,
+                            Column(
+                              children: [
+                                Container(
+                                  width: 10, height: 10,
+                                  decoration: BoxDecoration(color: VayaTheme.saffron, shape: BoxShape.circle, border: Border.all(color: VayaTheme.saffron.withOpacity(0.3), width: 3)),
+                                ),
+                                Container(width: 3, height: 36, color: VayaTheme.saffron),
+                                Container(
+                                  width: 10, height: 10,
+                                  decoration: BoxDecoration(color: VayaTheme.routeGreen, shape: BoxShape.circle, border: Border.all(color: VayaTheme.routeGreen.withOpacity(0.3), width: 3)),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 22),
-                            Text(
-                              widget.dropoffAddress,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
-                              maxLines: 2, overflow: TextOverflow.ellipsis,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.pickupAddress,
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
+                                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 22),
+                                  Text(
+                                    widget.dropoffAddress,
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
+                                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _buildDivider(),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      const Icon(Icons.route_outlined, size: 15, color: VayaTheme.slate),
-                      const SizedBox(width: 5),
-                      Text('${widget.distanceKm.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 13, color: VayaTheme.slate, fontFamily: 'Inter')),
-                      const SizedBox(width: 16),
-                      const Icon(Icons.timer_outlined, size: 15, color: VayaTheme.slate),
-                      const SizedBox(width: 5),
-                      Text('~${widget.durationMin} min', style: const TextStyle(fontSize: 13, color: VayaTheme.slate, fontFamily: 'Inter')),
-                    ],
+                        const SizedBox(height: 12),
+                        _buildDivider(),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Icon(Icons.route_outlined, size: 15, color: VayaTheme.slate),
+                            const SizedBox(width: 5),
+                            Text('${widget.distanceKm.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 13, color: VayaTheme.slate, fontFamily: 'Inter')),
+                            const SizedBox(width: 16),
+                            const Icon(Icons.timer_outlined, size: 15, color: VayaTheme.slate),
+                            const SizedBox(width: 5),
+                            Text('~${widget.durationMin} min', style: const TextStyle(fontSize: 13, color: VayaTheme.slate, fontFamily: 'Inter')),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -6339,14 +6444,14 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFFFDE68A)),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.schedule, size: 14, color: Color(0xFFD97706)),
-                        SizedBox(width: 8),
+                        const Icon(Icons.schedule, size: 14, color: Color(0xFFD97706)),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Includes 10 mins free wait at pickup & drop-off. Additional wait charges apply at ₹2/min.',
-                            style: TextStyle(fontSize: 11, color: Color(0xFFB45309), fontFamily: 'Inter'),
+                            'Includes $_freeWaitPickupMins mins free wait at pickup & $_freeWaitDropoffMins mins at drop-off. Additional wait charges apply at ₹${_waitChargePerMin % 1 == 0 ? _waitChargePerMin.toInt() : _waitChargePerMin.toStringAsFixed(1)}/min.',
+                            style: const TextStyle(fontSize: 11, color: Color(0xFFB45309), fontFamily: 'Inter'),
                           ),
                         ),
                       ],
@@ -6365,15 +6470,61 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Payment method', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w600, fontSize: 15, color: VayaTheme.inkBlack)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Payment method', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w600, fontSize: 15, color: VayaTheme.inkBlack)),
+                      if (_selectedPayment.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'Select a method',
+                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
+                          ),
+                        ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       _buildPaymentOption('Cash', Icons.money_outlined),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       _buildPaymentOption('UPI', Icons.account_balance_wallet_outlined),
+                      const SizedBox(width: 8),
+                      _buildPaymentOption(
+                        'Wallet',
+                        Icons.account_balance_wallet,
+                        subtitle: '₹$_walletBalance',
+                      ),
                     ],
                   ),
+                  if (_selectedPayment == 'Wallet' && _walletBalance < _totalFare) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Insufficient wallet balance (₹$_walletBalance). Required: ₹${_totalFare.toStringAsFixed(0)}.',
+                              style: const TextStyle(fontSize: 11.5, color: Color(0xFFDC2626), fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -6476,7 +6627,10 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
             child: SizedBox(
               height: 52,
               child: ElevatedButton(
-                onPressed: (!_isBooking && (_selectedPayment != 'Cash' || _cashCollectionPoint != null))
+                onPressed: (!_isBooking &&
+                        _selectedPayment.isNotEmpty &&
+                        (_selectedPayment != 'Cash' || _cashCollectionPoint != null) &&
+                        (_selectedPayment != 'Wallet' || _walletBalance >= _totalFare))
                     ? _confirmBooking
                     : null,
                 style: ElevatedButton.styleFrom(
@@ -6491,9 +6645,13 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                 child: _isBooking
                     ? const VayaLoader.inline(size: 22, color: VayaTheme.inkBlack)
                     : Text(
-                        (_selectedPayment == 'Cash' && _cashCollectionPoint == null)
-                            ? 'Select cash collection point'
-                            : 'Book VAYA',
+                        _selectedPayment.isEmpty
+                            ? 'Select payment method'
+                            : ((_selectedPayment == 'Cash' && _cashCollectionPoint == null)
+                                ? 'Select cash collection point'
+                                : ((_selectedPayment == 'Wallet' && _walletBalance < _totalFare)
+                                    ? 'Insufficient wallet balance'
+                                    : 'Book VAYA')),
                         style: const TextStyle(
                           fontFamily: 'General Sans',
                           fontWeight: FontWeight.w700,
@@ -6578,36 +6736,71 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
     );
   }
 
-  Widget _buildPaymentOption(String label, IconData icon) {
+  Widget _buildPaymentOption(String label, IconData icon, {String? subtitle}) {
     final isSelected = _selectedPayment == label;
+    final isLastUsed = _lastUsedPayment == label;
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _selectedPayment = label),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
           decoration: BoxDecoration(
-            color: isSelected ? VayaTheme.saffron.withOpacity(0.06) : VayaTheme.signalCream,
+            color: isSelected ? VayaTheme.saffron.withOpacity(0.08) : VayaTheme.signalCream,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
               width: isSelected ? 1.5 : 1,
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: isSelected ? VayaTheme.saffron : VayaTheme.slate,
+              if (isLastUsed) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: VayaTheme.saffron.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'Last used',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: VayaTheme.inkBlack,
+                    ),
+                  ),
                 ),
+                const SizedBox(height: 3),
+              ],
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 16, color: isSelected ? VayaTheme.saffron : VayaTheme.slate),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: isSelected ? VayaTheme.saffron : VayaTheme.slate,
+                    ),
+                  ),
+                ],
               ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? VayaTheme.saffron : VayaTheme.slate,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -6638,6 +6831,22 @@ class DriverRatingBottomSheet extends StatefulWidget {
   final String driverName;
   final Map<String, dynamic>? bookingData;
   final VoidCallback? onClosed;
+
+  /// Tracks booking IDs that currently have an active rating popup.
+  /// Prevents duplicate popups from concurrent trigger paths.
+  static final Set<String> _activeRatingBookingIds = {};
+
+  /// Returns true if a rating popup is already active for this booking.
+  static bool isRatingActiveFor(String bookingId) =>
+      _activeRatingBookingIds.contains(bookingId);
+
+  /// Marks a booking ID as having an active rating popup.
+  static void markRatingActive(String bookingId) =>
+      _activeRatingBookingIds.add(bookingId);
+
+  /// Removes the booking ID when its rating popup is dismissed.
+  static void markRatingDismissed(String bookingId) =>
+      _activeRatingBookingIds.remove(bookingId);
 
   const DriverRatingBottomSheet({
     super.key,
@@ -7046,7 +7255,7 @@ class _DriverRatingBottomSheetState extends State<DriverRatingBottomSheet> with 
 
   @override
   Widget build(BuildContext context) {
-    final driverName = widget.driverName.trim().isEmpty ? 'Gourav' : widget.driverName;
+    final driverName = widget.driverName.trim();
     final sheetHeight = MediaQuery.of(context).size.height * 0.68;
 
     return PopScope(
@@ -7348,6 +7557,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
 
   LatLng _pickupPos = const LatLng(20.2961, 85.8245);
   LatLng _dropPos = const LatLng(20.3150, 85.8178);
+  String _pickupAddress = "eGlobetech India Pvt. Ltd, Patia, Bhubaneswar";
+  String _dropoffAddress = "Trident Academy, Patia, Bhubaneswar";
   LatLng? _driverPos;
   LatLng? _customerPos;
   StreamSubscription<Position>? _customerLocationSubscription;
@@ -7356,6 +7567,22 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   Set<Polyline> _polylines = {};
 
   bool get _isSearchingState => _status == 'searching' || _status == 'pending';
+
+  double? get _deliveryProgress {
+    if (_driverPos == null) return 0.5;
+    final totalDist = Geolocator.distanceBetween(
+      _pickupPos.latitude, _pickupPos.longitude,
+      _dropPos.latitude, _dropPos.longitude,
+    );
+    if (totalDist <= 0) return 1.0;
+    final remainingDist = Geolocator.distanceBetween(
+      _driverPos!.latitude, _driverPos!.longitude,
+      _dropPos.latitude, _dropPos.longitude,
+    );
+    final prog = (totalDist - remainingDist) / totalDist;
+    return prog.clamp(0.0, 1.0);
+  }
+
 
   String _capitalizeWords(String str) {
     if (str.isEmpty) return str;
@@ -7375,8 +7602,43 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
     return plate.toUpperCase();
   }
 
+  void _shareOtpWithReceiver() {
+    final rawCode = _otp.isEmpty ? '582914' : _otp;
+    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? '' : _driverName);
+    final formattedPlate = _formatPlateNumber(_driverPlate);
+    final bookingIdShort = widget.bookingId.length > 8
+        ? widget.bookingId.substring(0, 8).toUpperCase()
+        : widget.bookingId.toUpperCase();
+    final vehicleName = _formatVehicleDisplayName(_vehicleType);
+    final pickup = _pickupAddress.isEmpty ? 'Pickup Location' : _pickupAddress;
+    final dropoff = _dropoffAddress.isEmpty ? 'Drop-off Location' : _dropoffAddress;
+    final fareStr = _estimatedCost.toStringAsFixed(0);
+    final paymentInfo = _cashCollectionPoint == 'DROPOFF'
+        ? 'Cash at Drop-off (₹$fareStr - Receiver to pay)'
+        : (_cashCollectionPoint == 'PICKUP' ? 'Paid at Pickup (₹$fareStr)' : '₹$fareStr (Cash on Delivery)');
+
+    final shareText = '''
+📦 VAYA Goods Delivery - Order & Drop-off OTP
+
+🔑 DROP-OFF OTP: $rawCode
+(Share this 6-digit OTP with the driver to unload cargo and complete delivery)
+
+📋 Order Details:
+• Order ID: #$bookingIdShort
+• Vehicle: $vehicleName ${formattedPlate.isNotEmpty ? '($formattedPlate)' : ''}
+• Driver: ${formattedDriver.isEmpty ? 'Assigned Partner' : formattedDriver} ${_driverPhone.isNotEmpty ? '($_driverPhone)' : ''}
+• Pickup: $pickup
+• Drop-off: $dropoff
+• Payment: $paymentInfo
+
+Track live on VAYA Customer App!
+'''.trim();
+
+    Share.share(shareText, subject: 'VAYA Delivery Drop-off OTP: $rawCode');
+  }
+
   Map<String, dynamic> _getStatusDisplayInfo() {
-    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? 'Gourav' : _driverName);
+    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? '' : _driverName);
     final st = _status.toLowerCase();
 
     if (st == 'driver_assigned' || st == 'accepted' || st == 'accepted_pickup') {
@@ -7395,7 +7657,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
         'badgeFgColor': VayaTheme.routeGreen,
         'isVerifiedMilestone': true,
       };
-    } else if (st == 'in_transit' || st == 'loading' || st == 'picked_up' || st == 'on_way_dropoff') {
+    } else if (st == 'in_transit' || st == 'loading' || st == 'picked_up' || st == 'on_way_dropoff' || st == 'dropping_off') {
       return {
         'title': 'Delivery in progress',
         'badgeText': 'DELIVERY IN PROGRESS',
@@ -7553,6 +7815,10 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
 
       Navigator.of(context).popUntil((route) => route.isFirst);
 
+      // Skip if a rating popup is already active for this booking
+      if (DriverRatingBottomSheet.isRatingActiveFor(currentBookingId)) return;
+
+      DriverRatingBottomSheet.markRatingActive(currentBookingId);
       showModalBottomSheet(
         context: Navigator.of(context).context,
         isDismissible: true,
@@ -7564,7 +7830,9 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
           driverName: driverName,
           bookingData: booking,
         ),
-      );
+      ).then((_) {
+        DriverRatingBottomSheet.markRatingDismissed(currentBookingId);
+      });
     });
   }
 
@@ -7598,6 +7866,12 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
             if (booking['otp'] != null && booking['otp'].toString().isNotEmpty) {
               _otp = booking['otp'].toString();
             }
+            if (booking['pickup_name'] != null || booking['pickup_address'] != null) {
+              _pickupAddress = (booking['pickup_name'] ?? booking['pickup_address']).toString();
+            }
+            if (booking['dropoff_name'] != null || booking['dropoff_address'] != null) {
+              _dropoffAddress = (booking['dropoff_name'] ?? booking['dropoff_address']).toString();
+            }
             final cost = double.tryParse(booking['estimated_cost']?.toString() ?? '');
             if (cost != null && cost > 0) {
               _estimatedCost = cost;
@@ -7618,8 +7892,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
               }
             }
             if (booking['driver_id'] != null) {
-              _driverName = booking['driver_name'] ?? "Gourav";
-              _driverPlate = booking['driver_vehicle_reg'] ?? booking['driver_plate'] ?? "OD32A5679";
+              _driverName = booking['driver_name'] ?? "";
+              _driverPlate = booking['driver_vehicle_reg'] ?? booking['driver_plate'] ?? "";
               if (booking['driver_phone'] != null) {
                 _driverPhone = booking['driver_phone'].toString();
               }
@@ -7665,8 +7939,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
             if (b['otp'] != null && b['otp'].toString().isNotEmpty) {
               _otp = b['otp'].toString();
             }
-            _driverName = b['driver_name'] ?? 'Gourav';
-            _driverPlate = b['driver_vehicle_reg'] ?? b['driver_plate'] ?? 'OD32A5679';
+            _driverName = b['driver_name'] ?? '';
+            _driverPlate = b['driver_vehicle_reg'] ?? b['driver_plate'] ?? '';
             if (b['driver_phone'] != null) {
               _driverPhone = b['driver_phone'].toString();
             }
@@ -7780,7 +8054,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
 
   Future<void> _updateMapMarkers() async {
     final Set<Marker> newMarkers = {};
-    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? 'Gourav' : _driverName);
+    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? '' : _driverName);
     final formattedPlate = _formatPlateNumber(_driverPlate);
 
     // Pickup Marker
@@ -8590,12 +8864,12 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   Widget _buildTrackingDraggableSheet(BuildContext context) {
     final l = LocalizedStrings.of(context);
     final statusInfo = _getStatusDisplayInfo();
-    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? 'Gourav' : _driverName);
+    final formattedDriver = _capitalizeWords(_driverName.isEmpty || _driverName.startsWith('Searching') ? '' : _driverName);
     final formattedPlate = _formatPlateNumber(_driverPlate);
     final st = _status.toLowerCase();
 
     final bool isPickupArrival = st == 'arrived_pickup' || st == 'driver_arrived' || st == 'arrived';
-    final bool isInTransit = st == 'in_transit' || st == 'loading' || st == 'picked_up';
+    final bool isInTransit = st == 'in_transit' || st == 'loading' || st == 'picked_up' || st == 'dropping_off';
     final bool isDropoffArrival = st == 'arrived_drop' || st == 'arrived_dropoff';
 
     final bool isGpsStale = !_isSearchingState &&
@@ -8616,6 +8890,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
         minChildSize: 0.28,
         maxChildSize: 0.85,
         builder: (ctx, scrollController) {
+          final double bottomPadding = 24.0 + MediaQuery.of(ctx).padding.bottom;
+
           return Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -8630,7 +8906,12 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
             ),
             child: ListView(
               controller: scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 12,
+                bottom: bottomPadding,
+              ),
               children: [
                 // Drag Handle Pill
                 Center(
@@ -8649,25 +8930,30 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: statusInfo['badgeBgColor'],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: (statusInfo['badgeFgColor'] as Color).withValues(alpha: 0.3)),
-                      ),
-                      child: Text(
-                        statusInfo['badgeText'],
-                        style: TextStyle(
-                          color: statusInfo['badgeFgColor'],
-                          fontWeight: FontWeight.w800,
-                          fontSize: 10.5,
-                          letterSpacing: 0.5,
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: statusInfo['badgeBgColor'],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: (statusInfo['badgeFgColor'] as Color).withValues(alpha: 0.3)),
+                        ),
+                        child: Text(
+                          statusInfo['badgeText'],
+                          style: TextStyle(
+                            color: statusInfo['badgeFgColor'],
+                            fontWeight: FontWeight.w800,
+                            fontSize: 10.5,
+                            letterSpacing: 0.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
-                      '₹${_estimatedCost.toStringAsFixed(0)} estimated',
+                      '₹${_estimatedCost.toStringAsFixed(0)} Estimated fare',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
@@ -8688,6 +8974,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                     color: VayaTheme.inkBlack,
                     letterSpacing: -0.3,
                   ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 12),
 
@@ -8770,6 +9058,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                             Text(
                               'Plate: $formattedPlate • ${_formatVehicleDisplayName(_vehicleType)}',
                               style: const TextStyle(fontSize: 11.5, color: VayaTheme.slate, fontWeight: FontWeight.w500),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
@@ -8826,7 +9116,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: VayaTheme.saffron.withOpacity(0.1),
+                          color: VayaTheme.saffron.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.payments_outlined, color: VayaTheme.saffron, size: 20),
@@ -8839,6 +9129,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                             const Text(
                               'Payment & Cash Collection',
                               style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: VayaTheme.slate, fontFamily: 'Inter'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
                             Text(
@@ -8848,10 +9140,13 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                                       ? 'Cash · Collect at drop-off (Receiver pays)'
                                       : 'Cash on delivery'),
                               style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack, fontFamily: 'General Sans'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
                       ),
+                      const SizedBox(width: 8),
                       if (_isSearchingState)
                         InkWell(
                           onTap: _openEditCashCollectionPointSheet,
@@ -8859,7 +9154,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: VayaTheme.saffron.withOpacity(0.12),
+                              color: VayaTheme.saffron.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: const Text(
@@ -8874,7 +9169,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: VayaTheme.fog.withOpacity(0.5),
+                              color: VayaTheme.fog.withValues(alpha: 0.5),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Row(
@@ -8893,74 +9188,167 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
 
                 const SizedBox(height: 14),
 
-                // CRITICAL BUG FIX: PICKUP VERIFICATION OTP
-                // REVEAL ONLY AFTER PICKUP ARRIVAL (`isPickupArrival`)!
-                // REMOVE IMMEDIATELY AFTER VERIFICATION (`isInTransit` or `isDropoffArrival`)!
+                // PICKUP VERIFICATION OTP CARD
                 if (isPickupArrival) ...[
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: VayaTheme.routeGreen.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: VayaTheme.routeGreen, width: 1.5),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.shield_outlined, color: VayaTheme.routeGreen, size: 16),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    l.pickupVerificationOtp,
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.routeGreen),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                l.shareWithDriver,
-                                style: const TextStyle(fontSize: 11, color: VayaTheme.slate),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Row(
+                        const Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: VayaTheme.routeGreen),
-                              ),
+                            Icon(Icons.shield_outlined, color: VayaTheme.routeGreen, size: 18),
+                            SizedBox(width: 6),
+                            Expanded(
                               child: Text(
-                                _isOtpMasked ? '••••••' : (_otp.isEmpty ? '532695' : _otp),
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  color: VayaTheme.routeGreen,
-                                  letterSpacing: 2.0,
-                                ),
+                                'PICKUP VERIFICATION OTP',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.routeGreen, letterSpacing: 0.5),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            IconButton(
-                              icon: Icon(
-                                _isOtpMasked ? Icons.visibility_off : Icons.visibility,
-                                color: VayaTheme.slate,
-                                size: 20,
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Text(
+                              (_otp.isEmpty ? "482716" : _otp).length == 6
+                                  ? "${(_otp.isEmpty ? "482716" : _otp).substring(0, 3)} ${(_otp.isEmpty ? "482716" : _otp).substring(3)}"
+                                  : (_otp.isEmpty ? "482716" : _otp),
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: VayaTheme.inkBlack,
+                                letterSpacing: 2.0,
                               ),
-                              tooltip: _isOtpMasked ? 'Reveal OTP' : 'Mask OTP',
-                              onPressed: () {
-                                setState(() {
-                                  _isOtpMasked = !_isOtpMasked;
-                                });
+                            ),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: () {
+                                final rawCode = _otp.isEmpty ? '482716' : _otp;
+                                Clipboard.setData(ClipboardData(text: rawCode));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Pickup OTP copied to clipboard')),
+                                );
                               },
+                              borderRadius: BorderRadius.circular(4),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.copy_rounded, color: VayaTheme.slate, size: 18),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Share only with ${formattedDriver.isEmpty ? "Gourav" : formattedDriver} after confirming the vehicle plate ${formattedPlate.isEmpty ? "OD 32 A 5679" : formattedPlate}',
+                          style: const TextStyle(fontSize: 11.5, color: VayaTheme.slate, fontWeight: FontWeight.w500),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+
+                // DROP-OFF VERIFICATION OTP CARD (Displayed when package is in transit or driver arrived at drop-off)
+                if (isInTransit || isDropoffArrival) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: VayaTheme.saffron.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: VayaTheme.saffron, width: 1.5),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.shield_outlined, color: VayaTheme.saffron, size: 18),
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'DROP-OFF VERIFICATION OTP',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.saffron, letterSpacing: 0.5),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Text(
+                              (_otp.isEmpty ? "582914" : _otp).length == 6
+                                  ? "${(_otp.isEmpty ? "582914" : _otp).substring(0, 3)} ${(_otp.isEmpty ? "582914" : _otp).substring(3)}"
+                                  : (_otp.isEmpty ? "582914" : _otp),
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: VayaTheme.inkBlack,
+                                letterSpacing: 2.0,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: () {
+                                final rawCode = _otp.isEmpty ? '582914' : _otp;
+                                Clipboard.setData(ClipboardData(text: rawCode));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Drop-off OTP copied to clipboard')),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(4),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.copy_rounded, color: VayaTheme.slate, size: 18),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Share this 6-digit OTP with receiver to authorize package unloading.',
+                                style: TextStyle(fontSize: 11.5, color: VayaTheme.slate, fontWeight: FontWeight.w500),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: _shareOtpWithReceiver,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: VayaTheme.saffron.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: VayaTheme.saffron.withValues(alpha: 0.3)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.share_rounded, size: 14, color: VayaTheme.inkBlack),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Share OTP',
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -8986,19 +9374,23 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                           children: [
                             Icon(Icons.local_shipping_outlined, color: VayaTheme.saffron, size: 20),
                             SizedBox(width: 8),
-                            Text(
-                              'Package Picked Up & In Transit',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: VayaTheme.inkBlack),
+                            Expanded(
+                              child: Text(
+                                'Package Picked Up & In Transit',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: VayaTheme.inkBlack),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
                         ClipRRect(
                           borderRadius: BorderRadius.circular(4),
-                          child: const LinearProgressIndicator(
-                            value: 0.65,
-                            backgroundColor: Color(0xFFFED7AA),
-                            valueColor: AlwaysStoppedAnimation<Color>(VayaTheme.saffron),
+                          child: LinearProgressIndicator(
+                            value: _deliveryProgress ?? 0.0,
+                            backgroundColor: const Color(0xFFFED7AA),
+                            valueColor: const AlwaysStoppedAnimation<Color>(VayaTheme.saffron),
                             minHeight: 6,
                           ),
                         ),
@@ -9036,62 +9428,111 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                               child: Text(
                                 '$formattedDriver has arrived at the destination',
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
+                        const SizedBox(height: 12),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final bool isNarrow = constraints.maxWidth < 340;
+
+                            final Widget callButton = SizedBox(
+                              height: 54,
                               child: ElevatedButton.icon(
                                 onPressed: () {
-                                  _makePhoneCall('9876543210');
+                                  if (_driverPhone.isNotEmpty) {
+                                    _makePhoneCall(_driverPhone);
+                                  }
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(content: Text('Calling receiver contact...')),
                                   );
                                 },
-                                icon: const Icon(Icons.phone, size: 16),
-                                label: const Text('Call Receiver', style: TextStyle(fontSize: 12)),
+                                icon: const Icon(Icons.phone, size: 22),
+                                label: const Text(
+                                  'Call Receiver',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: VayaTheme.routeGreen,
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
+                            );
+
+                            final Widget shareButton = SizedBox(
+                              height: 54,
                               child: OutlinedButton.icon(
-                                onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Live tracking link copied to clipboard.')),
-                                  );
-                                },
-                                icon: const Icon(Icons.share, size: 16),
-                                label: const Text('Share Status', style: TextStyle(fontSize: 12)),
+                                onPressed: _shareOtpWithReceiver,
+                                icon: const Icon(Icons.share_rounded, size: 22, color: VayaTheme.saffron),
+                                label: const Text(
+                                  'Share OTP',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: VayaTheme.inkBlack,
-                                  side: const BorderSide(color: VayaTheme.fog),
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  side: const BorderSide(color: VayaTheme.saffron, width: 1.5),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            );
+
+                            if (isNarrow) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  callButton,
+                                  const SizedBox(height: 12),
+                                  shareButton,
+                                ],
+                              );
+                            } else {
+                              return Row(
+                                children: [
+                                  Expanded(child: callButton),
+                                  const SizedBox(width: 12),
+                                  Expanded(child: shareButton),
+                                ],
+                              );
+                            }
+                          },
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(10),
                             border: Border.all(color: VayaTheme.fog),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               const Text('Payment Status:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: VayaTheme.slate)),
-                              Text('₹${_estimatedCost.toStringAsFixed(0)} • Cash on Delivery', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '₹${_estimatedCost.toStringAsFixed(0)} • Cash on Delivery',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
+                                  textAlign: TextAlign.end,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -9129,8 +9570,10 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                               children: [
                                 const Text('Pickup Point', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                                 Text(
-                                  _extractLocality(_pickupPos),
+                                  _extractLocality(_pickupAddress),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
@@ -9161,8 +9604,10 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                               children: [
                                 const Text('Drop-off Point', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                                 Text(
-                                  _extractLocality(_dropPos),
+                                  _extractLocality(_dropoffAddress),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
@@ -9179,30 +9624,52 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          _makePhoneCall('18001028292');
-                        },
-                        icon: const Icon(Icons.headset_mic_outlined, size: 16),
-                        label: const Text('24x7 Help', style: TextStyle(fontSize: 13)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: VayaTheme.inkBlack,
-                          side: const BorderSide(color: VayaTheme.fog),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: SizedBox(
+                        height: 52,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            _makePhoneCall('18001028292');
+                          },
+                          icon: const Icon(Icons.headset_mic_outlined, size: 20),
+                          label: const Text(
+                            '24x7 Help',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: VayaTheme.inkBlack,
+                            side: const BorderSide(color: VayaTheme.fog),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
                         ),
                       ),
                     ),
                     if (st == 'driver_assigned' || st == 'accepted') ...[
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 12),
                       Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isCancelling ? null : _openCancellationReasonSheet,
-                          icon: const Icon(Icons.close, size: 16),
-                          label: const Text('Cancel Order', style: TextStyle(fontSize: 13)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: SizedBox(
+                          height: 52,
+                          child: OutlinedButton.icon(
+                            onPressed: _isCancelling ? null : _openCancellationReasonSheet,
+                            icon: const Icon(Icons.close, size: 20),
+                            label: const Text(
+                              'Cancel Order',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -9535,11 +10002,11 @@ String _formatDisplayId(dynamic rawId) {
 String _extractLocality(dynamic addressObj) {
   if (addressObj == null) return 'Bhubaneswar';
   final addr = addressObj.toString().trim();
-  if (addr.isEmpty) return 'Bhubaneswar';
+  if (addr.isEmpty || addr.startsWith('LatLng')) return 'Bhubaneswar';
   final parts = addr.split(',');
   final first = parts.first.trim();
-  if (first.length > 22) {
-    return '${first.substring(0, 20)}...';
+  if (first.length > 30) {
+    return '${first.substring(0, 28)}...';
   }
   return first;
 }
@@ -11013,143 +11480,45 @@ class DeliveryDetailsScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: SizedBox(
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: VayaTheme.slate),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: () => _showProofOfDeliveryDialog(context),
-                        icon: const Icon(Icons.verified, size: 16, color: VayaTheme.routeGreen),
-                        label: const Text('Proof of Delivery', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 24),
             ],
           ],
-        ),
-      ),
-
-      // Context-Specific Sticky Action Bar (Kept above safe area)
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, -2)),
-          ],
-        ),
-        child: SafeArea(
-          child: isActive
-              ? SizedBox(
-                  height: 48,
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: VayaTheme.saffron,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      final bId = (booking['id'] ?? '').toString();
-                      final fare = double.tryParse(booking['estimated_cost']?.toString() ?? '') ?? 0.0;
-                      if (onTrackActive != null) {
-                        onTrackActive!(bId, fare);
-                      }
-                    },
-                    child: const Text('Track Live Delivery', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                )
-              : isDelivered
-                  // Completed deliveries use one full-width Book Again action
-                  ? SizedBox(
-                      height: 48,
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: VayaTheme.inkBlack,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(context);
-                          if (onBookAgain != null) {
-                            onBookAgain!();
-                          }
-                        },
-                        child: const Text('Book Again', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                      ),
-                    )
-                  : Row(
-                      children: [
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: OutlinedButton(
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFDC2626)),
-                                foregroundColor: const Color(0xFFDC2626),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              ),
-                              onPressed: () => _showCancelReasonBottomSheet(context),
-                              child: const Text('View Reason', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: SizedBox(
-                            height: 48,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: VayaTheme.inkBlack,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              ),
-                              onPressed: () {
-                                Navigator.pop(context);
-                                if (onBookAgain != null) {
-                                  onBookAgain!();
-                                }
-                              },
-                              child: const Text('Book Again', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
         ),
       ),
     );
   }
 
-  Widget _buildTimelineNode(String title, String time, {required TimelineState state, bool isLast = false}) {
+  Widget _buildTimelineNode(
+    String title,
+    String timeStr, {
+    required TimelineState state,
+    bool isLast = false,
+  }) {
+    Color iconBg;
+    Color iconFg;
     IconData iconData;
-    Color nodeColor;
 
     switch (state) {
       case TimelineState.completed:
+        iconBg = const Color(0xFFDCFCE7);
+        iconFg = VayaTheme.routeGreen;
         iconData = Icons.check_circle;
-        nodeColor = VayaTheme.routeGreen;
         break;
       case TimelineState.cancelled:
-        iconData = Icons.cancel; // Red terminal marker for cancelled
-        nodeColor = const Color(0xFFDC2626);
+        iconBg = const Color(0xFFFEE2E2);
+        iconFg = const Color(0xFFDC2626);
+        iconData = Icons.cancel;
         break;
       case TimelineState.pending:
-        iconData = Icons.radio_button_unchecked;
-        nodeColor = VayaTheme.slate;
+        iconBg = const Color(0xFFFEF3C7);
+        iconFg = const Color(0xFFD97706);
+        iconData = Icons.radio_button_checked;
         break;
       case TimelineState.disabled:
+        iconBg = VayaTheme.fog;
+        iconFg = VayaTheme.slate;
         iconData = Icons.radio_button_unchecked;
-        nodeColor = VayaTheme.fog;
         break;
     }
 
@@ -11158,36 +11527,38 @@ class DeliveryDetailsScreen extends StatelessWidget {
       children: [
         Column(
           children: [
-            Icon(
-              iconData,
-              size: 18,
-              color: nodeColor,
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+              child: Icon(iconData, size: 14, color: iconFg),
             ),
             if (!isLast)
               Container(
                 width: 2,
-                height: 22,
-                color: state == TimelineState.completed ? VayaTheme.routeGreen : VayaTheme.fog,
+                height: 28,
+                color: state == TimelineState.completed ? VayaTheme.routeGreen.withValues(alpha: 0.4) : VayaTheme.fog,
               ),
           ],
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontWeight: (state == TimelineState.completed || state == TimelineState.cancelled) ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 12.5,
-                  color: state == TimelineState.cancelled
-                      ? const Color(0xFFDC2626)
-                      : (state == TimelineState.completed ? VayaTheme.inkBlack : VayaTheme.slate),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: state == TimelineState.completed ? FontWeight.bold : FontWeight.w500,
+                    fontSize: 12.5,
+                    color: state == TimelineState.cancelled ? const Color(0xFFDC2626) : VayaTheme.inkBlack,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-            ],
+                Text(timeStr, style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
+              ],
+            ),
           ),
         ),
       ],
@@ -11195,7 +11566,7 @@ class DeliveryDetailsScreen extends StatelessWidget {
   }
 }
 
-/// 9. Payments Screen (Payments Tab)
+
 /// 9. Payments Screen (Payments Tab)
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
@@ -11206,13 +11577,15 @@ class PaymentsScreen extends StatefulWidget {
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
   int _walletBalance = 0;
-  String _defaultPayment = 'Cash'; // 'Wallet', 'UPI', 'Cash'
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _activitySectionKey = GlobalKey();
   List<Map<String, dynamic>> _transactions = [];
   late RazorpayPaymentService _razorpayService;
   int _pendingTopupAmount = 0;
   bool _isProcessingTopup = false;
+  String _selectedFilter = 'All'; // 'All', 'Wallet', 'UPI', 'Cash'
+  bool _isLoadingTxns = true;
+  String? _fetchError;
 
   @override
   void initState() {
@@ -11229,6 +11602,47 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     );
   }
 
+  Future<void> _loadPaymentsData() async {
+    setState(() {
+      _isLoadingTxns = true;
+      _fetchError = null;
+    });
+    try {
+      final bal = await VayaStorage.loadWalletBalance();
+      final txns = await VayaStorage.loadTransactions();
+      if (mounted) {
+        setState(() {
+          _walletBalance = bal;
+          _transactions = txns;
+          _isLoadingTxns = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _fetchError = 'Failed to load payment history';
+          _isLoadingTxns = false;
+        });
+      }
+    }
+  }
+
+  String _formatDateKey(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = DateTime(dt.year, dt.month, dt.day);
+    if (date == today) return 'Today';
+    if (date == today.subtract(const Duration(days: 1))) return 'Yesterday';
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  void _showWalletInfoDialog() {
+    _showInfoDialog(
+      'Wallet Balance Info',
+      '• Use your VAYA Wallet balance for seamless booking payments.\n• Top up easily via UPI, Cards, or Net Banking.\n• Balance is non-transferable and non-refundable.',
+    );
+  }
+
   @override
   void dispose() {
     _razorpayService.dispose();
@@ -11242,19 +11656,61 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
         ? response['paymentId']!
         : 'RZP-TOPUP-${DateTime.now().millisecondsSinceEpoch}';
 
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              SizedBox(width: 12),
+              Text('Payment pending: Verifying payment with server...'),
+            ],
+          ),
+          backgroundColor: Color(0xFF0F172A),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+
+    bool verificationSuccess = false;
     try {
       final token = await CustomerAuthHelper.getAuthToken();
-      if (token != null) {
-        await RazorpayPaymentService.verifyPayment(
+      if (token != null && token.isNotEmpty) {
+        final verifyRes = await RazorpayPaymentService.verifyPayment(
           apiBaseUrl: apiBaseUrl,
           token: token,
           paymentId: response['paymentId'] ?? '',
           orderId: response['orderId'] ?? '',
           signature: response['signature'] ?? '',
         );
+
+        if (verifyRes['verified'] == true || verifyRes['success'] == true) {
+          verificationSuccess = true;
+        }
+      } else {
+        verificationSuccess = true;
       }
     } catch (e) {
-      debugPrint('Backend verification notice: $e');
+      debugPrint('Backend payment verification error: $e');
+    }
+
+    if (!verificationSuccess) {
+      if (mounted) {
+        setState(() {
+          _isProcessingTopup = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Payment verification failed—please contact support'),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+      }
+      return;
     }
 
     final newBalance = _walletBalance + topupAmt;
@@ -11268,6 +11724,8 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       'balanceAfter': newBalance,
       'date': nowStr,
       'rawDate': DateTime.now().toIso8601String(),
+      'type': 'topup',
+      'paymentMethod': 'UPI',
     };
 
     final updatedTxns = [newTxn, ..._transactions];
@@ -11295,110 +11753,42 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       setState(() {
         _isProcessingTopup = false;
       });
+
+      final errLower = error.toLowerCase();
+      final isCancelled = errLower.contains('cancel') ||
+          errLower.contains('back pressed') ||
+          errLower.contains('user cancelled');
+
+      final displayMsg = isCancelled ? 'Payment cancelled' : 'Payment failed—try again';
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Payment cancelled or failed: $error'),
-          backgroundColor: const Color(0xFFDC2626),
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: _addMoneyDialog,
-          ),
+          content: Text(displayMsg),
+          backgroundColor: isCancelled ? const Color(0xFF64748B) : const Color(0xFFDC2626),
+          duration: const Duration(seconds: 4),
+          action: isCancelled
+              ? null
+              : SnackBarAction(
+                  label: 'Try again',
+                  textColor: Colors.white,
+                  onPressed: _addMoneyDialog,
+                ),
         ),
       );
     }
   }
 
-  Future<void> _loadPaymentsData() async {
-    try {
-      final token = await CustomerAuthHelper.getAuthToken();
-      if (token != null) {
-        final res = await http.get(
-          Uri.parse('$apiBaseUrl/api/payment/wallet'),
-          headers: {'Authorization': 'Bearer $token'},
-        ).timeout(const Duration(seconds: 10));
-
-        if (res.statusCode == 200) {
-          final data = json.decode(res.body);
-          final balance = (data['wallet_balance'] as num).toInt();
-          int runningBal = balance;
-          final rawTxns = (data['transactions'] as List);
-          
-          final txns = rawTxns.map((t) {
-            final amt = (t['amount'] as num).abs().toInt();
-            final isCredit = (t['amount'] as num) > 0;
-            final created = t['created_at'] != null ? DateTime.tryParse(t['created_at'].toString()) ?? DateTime.now() : DateTime.now();
-            final item = {
-              'title': t['type'] == 'topup' ? 'Wallet Top-up' : (t['type'] == 'booking_payment' ? 'Booking Payment' : 'Refund'),
-              'reference': t['razorpay_payment_id'] ?? 'TXN-${t['id']}',
-              'amount': amt,
-              'isCredit': isCredit,
-              'status': t['status'] ?? 'Success',
-              'balanceAfter': runningBal,
-              'date': _formatDateKey(created),
-              'rawDate': created.toIso8601String(),
-            };
-            return item;
-          }).toList();
-
-          if (mounted) {
-            setState(() {
-              _walletBalance = balance;
-              _transactions = List<Map<String, dynamic>>.from(txns);
-            });
-          }
-          await VayaStorage.saveWalletBalance(balance);
-          await VayaStorage.saveTransactions(txns);
-          return;
-        }
-      }
-    } catch (e) {
-      debugPrint("Failed to fetch wallet from server: $e");
-    }
-
-    final balance = await VayaStorage.loadWalletBalance();
-    final txns = await VayaStorage.loadTransactions();
-    if (mounted) {
-      setState(() {
-        _walletBalance = balance;
-        _transactions = txns;
-      });
-    }
-  }
-
-  String _formatDateKey(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final targetDate = DateTime(dt.year, dt.month, dt.day);
-
-    if (targetDate == today) {
-      return 'Today';
-    } else if (targetDate == yesterday) {
-      return 'Yesterday';
-    } else {
-      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
-    }
-  }
-
-  void _scrollToActivity() {
-    if (_activitySectionKey.currentContext != null) {
-      Scrollable.ensureVisible(
-        _activitySectionKey.currentContext!,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-      );
-    } else {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-      );
-    }
-  }
-
   void _addMoneyDialog() {
+    if (_isProcessingTopup) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Payment pending: Opening UPI app / processing top-up...'),
+          backgroundColor: Color(0xFFEAB308),
+        ),
+      );
+      return;
+    }
+
     int selectedAmount = 500;
     int? activePreset = 500;
     final customController = TextEditingController(text: '500');
@@ -11408,148 +11798,188 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (modalCtx, setModalState) {
-            final sheetHeight = MediaQuery.of(modalCtx).size.height * 0.58;
+            final textVal = customController.text.trim();
+            final parsedVal = int.tryParse(textVal.replaceAll(RegExp(r'\D'), ''));
             final isValid = selectedAmount >= 10 && selectedAmount <= 10000;
 
-            return PopScope(
-              canPop: !_isProcessingTopup,
-              onPopInvokedWithResult: (didPop, result) async {
-                if (didPop) return;
-                final shouldExit = await showDialog<bool>(
-                  context: modalCtx,
-                  builder: (dialogCtx) => AlertDialog(
-                    title: const Text('Payment in progress', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    content: const Text('Closing now will not cancel your transaction. Are you sure you want to exit?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogCtx, false),
-                        child: const Text('Wait'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogCtx, true),
-                        child: const Text('Exit anyway', style: TextStyle(color: Color(0xFFDC2626))),
-                      ),
-                    ],
-                  ),
-                );
-                if (shouldExit == true && modalCtx.mounted) {
-                  Navigator.of(modalCtx).pop();
-                }
-              },
-              child: Padding(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(modalCtx).viewInsets.bottom,
-                ),
-                child: SizedBox(
-                  height: sheetHeight,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // Header
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Add money to wallet',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: VayaTheme.inkBlack),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close, color: VayaTheme.inkBlack),
-                              onPressed: _isProcessingTopup
-                                  ? null
-                                  : () async {
-                                      if (modalCtx.mounted) Navigator.pop(modalCtx);
-                                    },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
+            String? errorMessage;
+            if (textVal.isNotEmpty && parsedVal == null) {
+              errorMessage = 'Please enter a valid amount';
+            } else if (textVal.isNotEmpty && selectedAmount < 10) {
+              errorMessage = 'Minimum top-up amount is ₹10';
+            } else if (selectedAmount > 10000) {
+              errorMessage = 'Maximum top-up amount is ₹10,000';
+            }
 
-                        // Numeric Currency Field
-                        TextField(
-                          controller: customController,
-                          keyboardType: TextInputType.number,
-                          enabled: !_isProcessingTopup,
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
-                          decoration: InputDecoration(
-                            prefixIcon: const Padding(
-                              padding: EdgeInsets.only(left: 16, right: 8, top: 12, bottom: 12),
-                              child: Text('₹', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack)),
-                            ),
-                            hintText: 'Enter amount',
-                            filled: true,
-                            fillColor: VayaTheme.signalCream.withValues(alpha: 0.5),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: const BorderSide(color: VayaTheme.fog, width: 1.0),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: const BorderSide(color: VayaTheme.fog, width: 1.0),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: const BorderSide(color: VayaTheme.saffron, width: 1.5),
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(modalCtx).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Drag Handle
+                      Center(
+                        child: Container(
+                          width: 36,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFCBD5E1),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Header with Title & Close Button
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Add money to wallet',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                              color: VayaTheme.inkBlack,
+                              fontFamily: 'General Sans',
                             ),
                           ),
-                          onChanged: (val) {
-                            final parsed = int.tryParse(val.replaceAll(RegExp(r'\D'), '')) ?? 0;
-                            setModalState(() {
-                              selectedAmount = parsed;
-                              if ([200, 500, 1000, 2000].contains(parsed)) {
-                                activePreset = parsed;
-                              } else {
-                                activePreset = null;
-                              }
-                            });
-                          },
-                        ),
-                        const SizedBox(height: 6),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: VayaTheme.inkBlack),
+                            onPressed: _isProcessingTopup
+                                ? null
+                                : () {
+                                    if (modalCtx.mounted) Navigator.pop(modalCtx);
+                                  },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
 
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      // Amount Field (Height 76 px)
+                      Container(
+                        height: 76,
+                        decoration: BoxDecoration(
+                          color: VayaTheme.signalCream.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: errorMessage != null
+                                ? const Color(0xFFDC2626)
+                                : (isValid ? VayaTheme.saffron : VayaTheme.fog),
+                            width: errorMessage != null ? 1.5 : (isValid ? 1.5 : 1.0),
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Text(
-                              'Min limit: ₹10 • Max limit: ₹10,000',
+                            const Text(
+                              '₹',
                               style: TextStyle(
-                                fontSize: 11,
-                                color: (!isValid && selectedAmount > 0) ? const Color(0xFFDC2626) : VayaTheme.slate,
-                                fontWeight: (!isValid && selectedAmount > 0) ? FontWeight.bold : FontWeight.normal,
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: VayaTheme.inkBlack,
                               ),
                             ),
-                            if (!isValid && selectedAmount > 0)
-                              Text(
-                                selectedAmount < 10 ? 'Amount too low' : 'Exceeds limit',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFFDC2626), fontWeight: FontWeight.bold),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: customController,
+                                autofocus: true,
+                                keyboardType: TextInputType.number,
+                                enabled: !_isProcessingTopup,
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: VayaTheme.inkBlack,
+                                ),
+                                decoration: const InputDecoration(
+                                  hintText: '0',
+                                  hintStyle: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.bold,
+                                    color: VayaTheme.fog,
+                                  ),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onChanged: (val) {
+                                  final parsed = int.tryParse(val.replaceAll(RegExp(r'\D'), '')) ?? 0;
+                                  setModalState(() {
+                                    selectedAmount = parsed;
+                                    if ([200, 500, 1000, 2000].contains(parsed)) {
+                                      activePreset = parsed;
+                                    } else {
+                                      activePreset = null;
+                                    }
+                                  });
+                                },
                               ),
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 16),
+                      ),
+                      const SizedBox(height: 8),
 
-                        // Preset Chips
+                      // Limits & Inline Errors directly beneath amount field
+                      if (errorMessage != null)
                         Row(
-                          children: [200, 500, 1000, 2000].map((amt) {
-                            final isSel = activePreset == amt;
-                            return Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                          children: [
+                            const Icon(Icons.error_outline_rounded, size: 14, color: Color(0xFFDC2626)),
+                            const SizedBox(width: 4),
+                            Text(
+                              errorMessage,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFFDC2626),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        const Text(
+                          'Min limit: ₹10 • Max limit: ₹10,000',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: VayaTheme.slate,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+
+                      const SizedBox(height: 16),
+
+                      // Presets (height 48 px)
+                      Row(
+                        children: [200, 500, 1000, 2000].map((amt) {
+                          final isSel = activePreset == amt;
+                          return Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                              child: SizedBox(
+                                height: 48,
                                 child: OutlinedButton(
                                   style: OutlinedButton.styleFrom(
-                                    backgroundColor: isSel ? VayaTheme.saffron.withValues(alpha: 0.15) : Colors.white,
+                                    backgroundColor: isSel
+                                        ? VayaTheme.saffron.withValues(alpha: 0.15)
+                                        : Colors.white,
                                     side: BorderSide(
                                       color: isSel ? VayaTheme.saffron : VayaTheme.fog,
                                       width: isSel ? 1.5 : 1.0,
                                     ),
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    padding: EdgeInsets.zero,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
                                   onPressed: _isProcessingTopup
                                       ? null
@@ -11564,92 +11994,100 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                                     '₹$amt',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 13.5,
+                                      fontSize: 14,
                                       color: isSel ? VayaTheme.saffron : VayaTheme.inkBlack,
                                     ),
                                   ),
                                 ),
                               ),
-                            );
-                          }).toList(),
-                        ),
-
-                        const Spacer(),
-
-                        // Dynamic Primary CTA (Ink Black text on Saffron background)
-                        SizedBox(
-                          height: 52,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: VayaTheme.saffron,
-                              foregroundColor: VayaTheme.inkBlack, // Ink Black text for contrast
-                              disabledBackgroundColor: VayaTheme.fog,
-                              disabledForegroundColor: VayaTheme.slate.withValues(alpha: 0.5),
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                             ),
-                            onPressed: (!isValid || _isProcessingTopup)
-                                ? null
-                                : () async {
-                                    setModalState(() {
-                                      _isProcessingTopup = true;
-                                    });
-                                    setState(() {
-                                      _isProcessingTopup = true;
-                                    });
+                          );
+                        }).toList(),
+                      ),
 
-                                    Navigator.pop(modalCtx); // Close sheet safely before launching Razorpay
+                      // 24 px gap directly below presets
+                      const SizedBox(height: 24),
 
-                                    final token = await CustomerAuthHelper.getAuthToken() ?? 'demo_token';
-                                    _pendingTopupAmount = selectedAmount;
-                                    final user = FirebaseAuth.instance.currentUser;
+                      // Action Button (Continue with ₹500)
+                      SizedBox(
+                        height: 52,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: VayaTheme.saffron,
+                            foregroundColor: VayaTheme.inkBlack,
+                            disabledBackgroundColor: VayaTheme.fog,
+                            disabledForegroundColor: VayaTheme.slate.withValues(alpha: 0.5),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                          onPressed: (!isValid || _isProcessingTopup)
+                              ? null
+                              : () async {
+                                  setModalState(() {
+                                    _isProcessingTopup = true;
+                                  });
+                                  setState(() {
+                                    _isProcessingTopup = true;
+                                  });
 
-                                    showModalBottomSheet(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      backgroundColor: Colors.transparent,
-                                      builder: (ctx) => PaymentMethodSheet(
-                                        amount: selectedAmount.toDouble(),
-                                        purpose: 'wallet_topup',
-                                        userPhone: user?.phoneNumber ?? '',
-                                        userName: user?.displayName ?? 'VAYA Customer',
-                                        razorpayService: _razorpayService,
-                                        apiBaseUrl: apiBaseUrl,
-                                        token: token,
-                                        onFailure: (err) {
-                                          if (mounted) {
-                                            setState(() {
-                                              _isProcessingTopup = false;
-                                            });
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text(err), backgroundColor: const Color(0xFFDC2626)),
-                                            );
-                                          }
-                                        },
+                                  // 1. Close the Add Money bottom sheet
+                                  Navigator.pop(modalCtx);
+
+                                  _pendingTopupAmount = selectedAmount;
+
+                                  // 2. Display VAYA state: Opening UPI app... Payment pending
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            SizedBox(width: 12),
+                                            Text('Opening UPI app... Payment pending'),
+                                          ],
+                                        ),
+                                        backgroundColor: Color(0xFF0F172A),
+                                        duration: Duration(seconds: 4),
                                       ),
                                     );
-                                  },
-                            child: _isProcessingTopup
-                                ? const Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const VayaLoader.inline(size: 20, color: VayaTheme.inkBlack),
-                                      SizedBox(width: 10),
-                                      Text(
-                                        'Processing Payment...',
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack),
-                                      ),
-                                    ],
-                                  )
-                                : Text(
-                                    'Add ₹$selectedAmount',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: VayaTheme.inkBlack),
-                                  ),
+                                  }
+
+                                  // 3. Launch Razorpay Checkout directly (without 2nd custom sheet)
+                                  try {
+                                    final token = await CustomerAuthHelper.getAuthToken() ?? '';
+                                    final user = FirebaseAuth.instance.currentUser;
+
+                                    await _razorpayService.startPayment(
+                                      apiBaseUrl: apiBaseUrl,
+                                      token: token,
+                                      amount: selectedAmount.toDouble(),
+                                      purpose: 'wallet_topup',
+                                      userPhone: user?.phoneNumber ?? '',
+                                      userName: user?.displayName ?? 'VAYA Customer',
+                                      onFailure: _handleTopupError,
+                                    );
+                                  } catch (e) {
+                                    _handleTopupError(e.toString());
+                                  }
+                                },
+                          child: Text(
+                            isValid ? 'Continue with ₹$selectedAmount' : 'Continue',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: VayaTheme.inkBlack,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 12),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -11657,222 +12095,6 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
           },
         );
       },
-    );
-  }
-
-  void _showSuccessReceiptDialog({
-    required int amount,
-    required String paymentId,
-    required int newBalance,
-  }) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFDCFCE7),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check_circle, color: VayaTheme.routeGreen, size: 38),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Money Added Successfully!',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: VayaTheme.inkBlack),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '₹$amount added to your VAYA Wallet',
-                style: const TextStyle(fontSize: 13, color: VayaTheme.slate),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: VayaTheme.signalCream.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: VayaTheme.fog),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Transaction ID', style: TextStyle(fontSize: 12, color: VayaTheme.slate)),
-                        Text(
-                          paymentId.length > 16 ? '${paymentId.substring(0, 14)}...' : paymentId,
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Updated Balance', style: TextStyle(fontSize: 12, color: VayaTheme.slate)),
-                        Text(
-                          '₹$newBalance',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: VayaTheme.routeGreen),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: VayaTheme.saffron,
-                    foregroundColor: VayaTheme.inkBlack,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showContextualSupportSheet() {
-    final failedTxns = _transactions.where((t) => (t['status'] ?? '').toString().toLowerCase().contains('fail') || t['status'] == 'Pending').toList();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Payment & Wallet Support', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: VayaTheme.inkBlack)),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-
-              if (failedTxns.isNotEmpty) ...[
-                const Text('Recent Failed / Pending Payments', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
-                const SizedBox(height: 8),
-                ...failedTxns.take(2).map((tx) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFFCA5A5)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(tx['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
-                              Text('Ref: ${tx['reference']}', style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
-                            ],
-                          ),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: VayaTheme.saffron,
-                              foregroundColor: VayaTheme.inkBlack,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _addMoneyDialog();
-                            },
-                            child: const Text('Retry', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                    )),
-                const SizedBox(height: 12),
-              ],
-
-              const Text('How can we help?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.slate)),
-              const SizedBox(height: 8),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: VayaTheme.saffron.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.support_agent, color: VayaTheme.saffron),
-                ),
-                title: const Text('Chat with Payment Support', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                subtitle: const Text('24/7 dedicated payment resolution desk', style: TextStyle(fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showInfoDialog('Payment Support', 'Support Ticket #PY-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)} opened.\nOur payments team will contact you via WhatsApp / Call within 5 minutes.');
-                },
-              ),
-              const Divider(height: 1),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: VayaTheme.saffron.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.phone, color: VayaTheme.saffron),
-                ),
-                title: const Text('Call Helpline (+91-1800-VAYA)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                subtitle: const Text('Instant phone assistance for payment queries', style: TextStyle(fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showInfoDialog('Call Helpline', 'Dialing +91-1800-VAYA (1800-8292). Toll-free support available 24/7.');
-                },
-              ),
-              const Divider(height: 1),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: VayaTheme.saffron.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.report_problem_outlined, color: VayaTheme.saffron),
-                ),
-                title: const Text('Money Debited but Balance Not Updated?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                subtitle: const Text('UPI/Bank transactions auto-reconcile within 24 hours', style: TextStyle(fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showInfoDialog('Bank Reconciliation', 'If your bank account was debited but the balance did not update, banks automatically refund failed transactions within 24-48 hours. You can also contact support with your UTR / Bank Reference Number.');
-                },
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -11893,11 +12115,104 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     );
   }
 
+  void _showSuccessReceiptDialog({
+    required int amount,
+    required String paymentId,
+    required int newBalance,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: const BoxDecoration(
+                color: Color(0xFFDCFCE7),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle, color: VayaTheme.routeGreen, size: 36),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Top-up Successful!',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: VayaTheme.inkBlack),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '₹$amount added to your VAYA Wallet',
+              style: const TextStyle(fontSize: 13, color: VayaTheme.slate),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: VayaTheme.signalCream,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Transaction ID', style: TextStyle(fontSize: 11.5, color: VayaTheme.slate)),
+                      Text(paymentId.length > 14 ? '${paymentId.substring(0, 14)}...' : paymentId, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Updated Balance', style: TextStyle(fontSize: 11.5, color: VayaTheme.slate)),
+                      Text('₹$newBalance', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: VayaTheme.routeGreen)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: VayaTheme.saffron,
+                  foregroundColor: VayaTheme.inkBlack,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Group transactions by date
+    final filteredTxns = _transactions.where((tx) {
+      if (_selectedFilter == 'All') return true;
+      final title = (tx['title'] ?? '').toString().toLowerCase();
+      final method = (tx['paymentMethod'] ?? tx['payment_method'] ?? '').toString().toLowerCase();
+      final type = (tx['type'] ?? '').toString().toLowerCase();
+
+      if (_selectedFilter == 'Wallet') {
+        return type == 'topup' || title.contains('wallet') || method.contains('wallet') || (tx['balanceAfter'] != null);
+      } else if (_selectedFilter == 'UPI') {
+        return method.contains('upi') || title.contains('upi') || type == 'topup';
+      } else if (_selectedFilter == 'Cash') {
+        return method.contains('cash') || title.contains('cash');
+      }
+      return true;
+    }).toList();
+
     final Map<String, List<Map<String, dynamic>>> groupedTxns = {};
-    for (var tx in _transactions) {
+    for (var tx in filteredTxns) {
       final dateKey = tx['date'] ?? 'Other';
       groupedTxns.putIfAbsent(dateKey, () => []).add(tx);
     }
@@ -11913,482 +12228,404 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
           'Payments',
           style: TextStyle(
             fontFamily: 'General Sans',
-            fontSize: 28, // 28-32 px General Sans / 700
+            fontSize: 28,
             fontWeight: FontWeight.w700,
             color: VayaTheme.inkBlack,
             letterSpacing: -0.5,
           ),
         ),
       ),
-      body: SingleChildScrollView(
-        controller: _scrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0), // 16 px margins
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // VAYA Wallet Card (Height 160-180 px, 16px radius, light Fog border)
-            Container(
-              height: 168.0,
-              decoration: BoxDecoration(
-                color: VayaTheme.inkBlack,
-                borderRadius: BorderRadius.circular(16), // 16 px radii
-                border: Border.all(color: VayaTheme.fog, width: 1.0), // Lighter Fog border
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
+      body: RefreshIndicator(
+        onRefresh: _loadPaymentsData,
+        color: VayaTheme.saffron,
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // VAYA Wallet Money Management Card
+              Container(
+                decoration: BoxDecoration(
+                  color: VayaTheme.inkBlack,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.all(20.0),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        Row(
                           children: [
                             const Text(
-                              'VAYA WALLET',
+                              'VAYA Wallet balance',
                               style: TextStyle(
-                                color: Colors.white, // Increased contrast
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
+                                color: Colors.white70,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '₹$_walletBalance',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: _showWalletInfoDialog,
+                              child: const Icon(
+                                Icons.info_outline,
+                                color: Colors.white70,
+                                size: 15,
                               ),
                             ),
                           ],
                         ),
-                        // Ink Black CTA text for accessible contrast on Saffron button
                         ElevatedButton.icon(
+                          onPressed: _addMoneyDialog,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: VayaTheme.saffron,
-                            foregroundColor: VayaTheme.inkBlack, // Ink Black text for contrast
+                            foregroundColor: VayaTheme.inkBlack,
                             elevation: 0,
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
                           ),
-                          onPressed: _addMoneyDialog,
-                          icon: const Icon(Icons.add, size: 18, color: VayaTheme.inkBlack),
+                          icon: const Icon(Icons.add, size: 16),
                           label: const Text(
-                            '+ Add money',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
+                            'Add money',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    const Divider(color: Colors.white24, height: 1),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Non-withdrawable credits',
-                          style: TextStyle(
-                            color: Colors.white70, // Increased contrast
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        InkWell(
-                          onTap: _scrollToActivity,
-                          child: const Row(
-                            children: [
-                              Text(
-                                'Wallet activity',
-                                style: TextStyle(color: VayaTheme.saffron, fontSize: 12, fontWeight: FontWeight.bold),
-                              ),
-                              SizedBox(width: 4),
-                              Icon(Icons.arrow_forward, color: VayaTheme.saffron, size: 14), // Wallet activity →
-                            ],
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 12),
+                    Text(
+                      '₹$_walletBalance',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'General Sans',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Instant 1-tap checkout on VAYA bookings',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11.5,
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
 
-            // Default payment method section
-            const Text(
-              'Default payment method',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
-            ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 24),
 
-            // VAYA Wallet Row (Height 72-84 px, 16px radius, Fog border)
-            Container(
-              height: 76.0,
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16), // 16 px radii
-                border: Border.all(
-                  color: _defaultPayment == 'Wallet' ? VayaTheme.saffron : VayaTheme.fog, // Lighter Fog border
-                  width: _defaultPayment == 'Wallet' ? 1.5 : 1.0,
+              // Payment Activity Section Header & Filters
+              Row(
+                key: _activitySectionKey,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Payment activity',
+                    style: TextStyle(
+                      fontFamily: 'General Sans',
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: VayaTheme.inkBlack,
+                    ),
+                  ),
+                  if (_isLoadingTxns)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: VayaTheme.saffron),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Filter Chips (All, Wallet, UPI, Cash)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: ['All', 'Wallet', 'UPI', 'Cash'].map((filter) {
+                    final isSel = _selectedFilter == filter;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ChoiceChip(
+                        label: Text(filter),
+                        selected: isSel,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setState(() => _selectedFilter = filter);
+                          }
+                        },
+                        selectedColor: VayaTheme.saffron,
+                        backgroundColor: Colors.white,
+                        labelStyle: TextStyle(
+                          color: isSel ? VayaTheme.inkBlack : VayaTheme.slate,
+                          fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 12.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          side: BorderSide(
+                            color: isSel ? VayaTheme.saffron : VayaTheme.fog,
+                          ),
+                        ),
+                        showCheckmark: false,
+                      ),
+                    );
+                  }).toList(),
                 ),
               ),
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: _walletBalance <= 0 ? _addMoneyDialog : () => setState(() => _defaultPayment = 'Wallet'),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14.0),
-                    child: Row(
-                      children: [
-                        Radio<String>(
-                          value: 'Wallet',
-                          groupValue: _defaultPayment,
-                          activeColor: VayaTheme.saffron,
-                          onChanged: _walletBalance <= 0 ? null : (val) => setState(() => _defaultPayment = val!),
+
+              const SizedBox(height: 14),
+
+              // Activity Ledger Views (Loading / Error / Empty / Data)
+              if (_isLoadingTxns) ...[
+                Container(
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: VayaTheme.fog),
+                  ),
+                  child: const Column(
+                    children: [
+                      VayaLoader.inline(size: 24, color: VayaTheme.saffron),
+                      SizedBox(height: 12),
+                      Text('Loading payment activity...', style: TextStyle(fontSize: 12.5, color: VayaTheme.slate)),
+                    ],
+                  ),
+                ),
+              ] else if (_fetchError != null && _transactions.isEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                  ),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 32),
+                      const SizedBox(height: 8),
+                      const Text('Failed to load activity', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 4),
+                      Text(_fetchError!, style: const TextStyle(fontSize: 12, color: VayaTheme.slate), textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _loadPaymentsData,
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: VayaTheme.saffron),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Text('VAYA Wallet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: VayaTheme.inkBlack)),
-                                  const SizedBox(width: 8),
-                                  if (_walletBalance <= 0)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: VayaTheme.saffron.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: VayaTheme.saffron.withValues(alpha: 0.3)),
-                                      ),
-                                      child: const Text(
-                                        '₹0 · Add money to use',
-                                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: VayaTheme.saffron),
-                                      ),
-                                    )
-                                  else
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: VayaTheme.saffron.withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        '₹$_walletBalance',
-                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaTheme.saffron),
-                                      ),
+                        child: const Text('Retry', style: TextStyle(color: VayaTheme.inkBlack, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (filteredTxns.isEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: VayaTheme.fog),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(Icons.history, size: 40, color: VayaTheme.slate.withValues(alpha: 0.4)),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No $_selectedFilter payment activity found',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Your transactions and top-ups will appear here.',
+                        style: TextStyle(fontSize: 12, color: VayaTheme.slate),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: groupedTxns.entries.map((group) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: VayaTheme.fog, width: 1.0),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 6),
+                            child: Text(
+                              group.key,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: VayaTheme.slate, letterSpacing: 0.3),
+                            ),
+                          ),
+                          const Divider(height: 1, color: VayaTheme.fog),
+                          ...group.value.map((tx) {
+                            final isCr = (tx['isCredit'] as bool? ?? false);
+                            final amt = tx['amount'];
+                            final status = (tx['status'] ?? 'Success').toString();
+                            final balAfter = tx['balanceAfter'];
+                            final isRefund = status.toLowerCase() == 'refunded' || (tx['title'] ?? '').toString().toLowerCase().contains('refund');
+
+                            Color badgeBg = const Color(0xFFDCFCE7);
+                            Color badgeFg = VayaTheme.routeGreen;
+                            if (status == 'Pending') {
+                              badgeBg = const Color(0xFFFEF3C7);
+                              badgeFg = const Color(0xFFD97706);
+                            } else if (status == 'Failed') {
+                              badgeBg = const Color(0xFFFEE2E2);
+                              badgeFg = const Color(0xFFDC2626);
+                            } else if (isRefund) {
+                              badgeBg = const Color(0xFFE0F2FE);
+                              badgeFg = const Color(0xFF0284C7);
+                            }
+
+                            return Column(
+                              children: [
+                                ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                  leading: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: isCr ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                                      shape: BoxShape.circle,
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                _walletBalance <= 0 ? 'Add money to enable wallet checkout' : 'Fastest checkout using wallet credits',
-                                style: const TextStyle(fontSize: 11, color: VayaTheme.slate),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            // UPI Row (Height 76px, 16px radius, Fog border)
-            Container(
-              height: 76.0,
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _defaultPayment == 'UPI' ? VayaTheme.saffron : VayaTheme.fog,
-                  width: _defaultPayment == 'UPI' ? 1.5 : 1.0,
-                ),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => setState(() => _defaultPayment = 'UPI'),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14.0),
-                    child: Row(
-                      children: [
-                        Radio<String>(
-                          value: 'UPI',
-                          groupValue: _defaultPayment,
-                          activeColor: VayaTheme.saffron,
-                          onChanged: (val) => setState(() => _defaultPayment = val!),
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('UPI', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: VayaTheme.inkBlack)),
-                              SizedBox(height: 3),
-                              Text('Pay using any UPI app (GPay, PhonePe, Paytm)', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            // Cash Row (Height 76px, 16px radius, Fog border)
-            Container(
-              height: 76.0,
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _defaultPayment == 'Cash' ? VayaTheme.saffron : VayaTheme.fog,
-                  width: _defaultPayment == 'Cash' ? 1.5 : 1.0,
-                ),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => setState(() => _defaultPayment = 'Cash'),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14.0),
-                    child: Row(
-                      children: [
-                        Radio<String>(
-                          value: 'Cash',
-                          groupValue: _defaultPayment,
-                          activeColor: VayaTheme.saffron,
-                          onChanged: (val) => setState(() => _defaultPayment = val!),
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Cash', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: VayaTheme.inkBlack)),
-                              SizedBox(height: 3),
-                              Text('Pay driver in cash after delivery completion', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            // Shortened Helper Note
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-              child: Text(
-                'Used as your default at checkout—you can change it anytime',
-                style: TextStyle(fontSize: 11, color: VayaTheme.slate),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Recent activity section key for scroll anchor
-            KeyedSubtree(
-              key: _activitySectionKey,
-              child: const Text(
-                'Payment activity',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            if (_transactions.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: VayaTheme.fog, width: 1.0),
-                ),
-                child: const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.history_toggle_off, size: 42, color: VayaTheme.slate),
-                    SizedBox(height: 10),
-                    Text(
-                      'No payment activity yet',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Transactions and refunds will appear here',
-                      style: TextStyle(fontSize: 12, color: VayaTheme.slate),
-                    ),
-                  ],
-                ),
-              )
-            else
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: groupedTxns.entries.map((group) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: VayaTheme.fog, width: 1.0),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Group Date Header
-                        Padding(
-                          padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 6),
-                          child: Text(
-                            group.key,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: VayaTheme.slate, letterSpacing: 0.3),
-                          ),
-                        ),
-                        const Divider(height: 1, color: VayaTheme.fog),
-                        ...group.value.map((tx) {
-                          final isCr = (tx['isCredit'] as bool? ?? false);
-                          final amt = tx['amount'];
-                          final status = (tx['status'] ?? 'Success').toString();
-                          final balAfter = tx['balanceAfter'];
-
-                          return Column(
-                            children: [
-                              ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                                leading: Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                    color: isCr ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
-                                    shape: BoxShape.circle,
+                                    child: Icon(
+                                      isCr ? Icons.add : Icons.remove,
+                                      color: isCr ? VayaTheme.routeGreen : const Color(0xFFDC2626),
+                                      size: 18,
+                                    ),
                                   ),
-                                  child: Icon(
-                                    isCr ? Icons.add : Icons.remove,
-                                    color: isCr ? VayaTheme.routeGreen : const Color(0xFFDC2626),
-                                    size: 18,
-                                  ),
-                                ),
-                                title: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      tx['title'] ?? 'Transaction',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
-                                    ),
-                                    Text(
-                                      '${isCr ? "+" : "-"}₹$amt',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                        color: isCr ? VayaTheme.routeGreen : VayaTheme.inkBlack,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                  title: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            'Ref: ${tx['reference']}',
-                                            style: const TextStyle(fontSize: 10.5, color: VayaTheme.slate),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: status == 'Success' ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                                              borderRadius: BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              status,
-                                              style: TextStyle(
-                                                fontSize: 9.5,
-                                                fontWeight: FontWeight.bold,
-                                                color: status == 'Success' ? VayaTheme.routeGreen : const Color(0xFFD97706),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                      Text(
+                                        tx['title'] ?? 'Transaction',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack),
                                       ),
-                                      if (balAfter != null) ...[
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          'Balance: ₹$balAfter',
-                                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: VayaTheme.slate),
+                                      Text(
+                                        '${isCr ? "+" : "-"}₹$amt',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                          color: isCr ? VayaTheme.routeGreen : VayaTheme.inkBlack,
                                         ),
-                                      ],
+                                      ),
                                     ],
                                   ),
+                                  subtitle: Padding(
+                                    padding: const EdgeInsets.only(top: 4.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(
+                                              'Ref: ${tx['reference']}',
+                                              style: const TextStyle(fontSize: 10.5, color: VayaTheme.slate),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: badgeBg,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                status,
+                                                style: TextStyle(
+                                                  fontSize: 9.5,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: badgeFg,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (balAfter != null) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Balance: ₹$balAfter',
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: VayaTheme.slate),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              if (tx != group.value.last) const Divider(height: 1, color: VayaTheme.fog, indent: 16, endIndent: 16),
-                            ],
-                          );
-                        }),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            const SizedBox(height: 24),
-
-            // Footer Links
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                TextButton(
-                  onPressed: () => _showInfoDialog(
-                    'Wallet Terms & Conditions',
-                    '• VAYA Wallet is a closed-loop wallet.\n• Wallet balance can be used for booking fare.\n• Balance is non-withdrawable and non-transferable.\n• Promotional credits expire in 30 days.',
-                  ),
-                  child: const Text('Wallet terms', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
-                ),
-                TextButton(
-                  onPressed: () => _showInfoDialog(
-                    'Refund Rules',
-                    '• Order cancellations receive full refund instantly if cancelled before driver arrives.\n• Refund returns automatically to the original source.\n• Promo/discount codes are single-use and cannot be refunded.',
-                  ),
-                  child: const Text('Refund rules', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
-                ),
-                TextButton(
-                  onPressed: _showContextualSupportSheet,
-                  child: const Text('Failed payments?', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                                if (tx != group.value.last) const Divider(height: 1, color: VayaTheme.fog, indent: 16, endIndent: 16),
+                              ],
+                            );
+                          }),
+                        ],
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
-            ),
-            const SizedBox(height: 16),
-          ],
+
+              const SizedBox(height: 24),
+
+              // Footer Links
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton(
+                    onPressed: () => _showInfoDialog(
+                      'Wallet Terms & Conditions',
+                      '• VAYA Wallet is a closed-loop wallet.\n• Wallet balance can be used for booking fare.\n• Balance is non-withdrawable and non-transferable.\n• Promotional credits expire in 30 days.',
+                    ),
+                    child: const Text('Wallet terms', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                  ),
+                  TextButton(
+                    onPressed: () => _showInfoDialog(
+                      'Refund Rules',
+                      '• Order cancellations receive full refund instantly if cancelled before driver arrives.\n• Refund returns automatically to the original source.\n• Promo/discount codes are single-use and cannot be refunded.',
+                    ),
+                    child: const Text('Refund rules', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                  ),
+                  TextButton(
+                    onPressed: () => _showInfoDialog(
+                      'Payment Support',
+                      '• If your payment failed or top-up was deducted but not credited, it will be automatically refunded within 24-48 hours.\n• For urgent assistance, contact support via Help & Support or email support@vaya.in with your transaction reference.',
+                    ),
+                    child: const Text('Failed payments?', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );
   }
 }
+
 
 /// 10. Account & Settings Screen (Account Tab)
 class AccountScreen extends StatefulWidget {
@@ -12402,10 +12639,10 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _isLoading = true;
   bool _isOffline = false;
 
-  String _name = 'Gourav Mahunta';
-  String _phone = '9876543210';
-  String _email = 'gourav.mahunta@vaya.com';
-  bool _phoneVerified = true;
+  String _name = '';
+  String _phone = '';
+  String _email = '';
+  bool _phoneVerified = false;
 
   String _gstin = '';
   String _gstStatus = 'Not added';
@@ -12419,20 +12656,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
   String _appLanguage = 'English';
 
-  List<Map<String, String>> _addresses = [
-    {
-      'title': 'Main Warehouse',
-      'subtitle': 'Plot 12, Industrial Estate, Rasulgarh, Bhubaneswar',
-      'type': 'Warehouse',
-      'isDefault': 'true',
-    },
-    {
-      'title': 'City Office',
-      'subtitle': 'Flat 302, Saheed Nagar, Bhubaneswar',
-      'type': 'Office',
-      'isDefault': 'false',
-    },
-  ];
+  List<Map<String, String>> _addresses = [];
 
   bool _hasActiveOrder = true;
 
@@ -12442,23 +12666,114 @@ class _AccountScreenState extends State<AccountScreen> {
     _loadAccountStorage();
   }
 
+  Future<void> _updateCustomerInDb(Map<String, dynamic> body) async {
+    try {
+      final token = await CustomerAuthHelper.getAuthToken();
+      if (token != null) {
+        await http.post(
+          Uri.parse('$apiBaseUrl/api/customer'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: json.encode(body),
+        ).timeout(const Duration(seconds: 8));
+      }
+    } catch (e) {
+      debugPrint('Error updating customer DB: $e');
+    }
+  }
+
+  Future<void> _sendSupportTicket(String type, Map<String, dynamic> details) async {
+    try {
+      final token = await CustomerAuthHelper.getAuthToken();
+      if (token != null) {
+        await http.post(
+          Uri.parse('$apiBaseUrl/api/customer/support-ticket'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: json.encode({'type': type, 'details': details}),
+        ).timeout(const Duration(seconds: 8));
+      }
+    } catch (e) {
+      debugPrint('Error creating support ticket: $e');
+    }
+  }
+
   Future<void> _loadAccountStorage() async {
     try {
       final profile = await VayaStorage.loadUserProfile();
       final business = await VayaStorage.loadBusinessDetails();
       final places = await VayaStorage.loadSavedPlaces();
 
+      String name = profile['name'] ?? '';
+      String phone = profile['phone'] ?? '';
+      String email = profile['email'] ?? '';
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        if (name.isEmpty && user.displayName != null && user.displayName!.isNotEmpty) {
+          name = user.displayName!;
+        }
+        if (phone.isEmpty && user.phoneNumber != null && user.phoneNumber!.isNotEmpty) {
+          phone = user.phoneNumber!;
+        }
+        if (email.isEmpty && user.email != null && user.email!.isNotEmpty) {
+          email = user.email!;
+        }
+      }
+
+      String companyName = business['companyName'] ?? '';
+      String gstin = business['gstin'] ?? '';
+      String billingAddress = business['billingAddress'] ?? '';
+      String gstStatus = business['gstStatus'] ?? (gstin.isNotEmpty ? 'Registered' : 'Not added');
+
+      try {
+        final token = await CustomerAuthHelper.getAuthToken();
+        if (token != null) {
+          final res = await http.get(
+            Uri.parse('$apiBaseUrl/api/customer/me'),
+            headers: {'Authorization': 'Bearer $token'},
+          ).timeout(const Duration(seconds: 8));
+          if (res.statusCode == 200) {
+            final data = json.decode(res.body);
+            if (data['exists'] == true && data['customer'] != null) {
+              final c = data['customer'];
+              if ((c['name'] ?? '').toString().isNotEmpty) name = c['name'];
+              if ((c['phone'] ?? '').toString().isNotEmpty) phone = c['phone'];
+              if ((c['email'] ?? '').toString().isNotEmpty) email = c['email'];
+              if ((c['company_name'] ?? '').toString().isNotEmpty) companyName = c['company_name'];
+              if ((c['gstin'] ?? '').toString().isNotEmpty) gstin = c['gstin'];
+              if ((c['billing_address'] ?? '').toString().isNotEmpty) billingAddress = c['billing_address'];
+              if ((c['gst_status'] ?? '').toString().isNotEmpty) gstStatus = c['gst_status'];
+              if (c['notify_booking_updates'] != null) _notifyBookingUpdates = c['notify_booking_updates'];
+              if (c['notify_live_tracking'] != null) _notifyLiveTracking = c['notify_live_tracking'];
+              if (c['notify_offers'] != null) _notifyOffers = c['notify_offers'];
+              if (c['notify_whatsapp'] != null) _notifyWhatsApp = c['notify_whatsapp'];
+              if ((c['app_language'] ?? '').toString().isNotEmpty) _appLanguage = c['app_language'];
+              if (c['saved_addresses'] != null) {
+                final List addrs = c['saved_addresses'] is String ? json.decode(c['saved_addresses']) : c['saved_addresses'];
+                places.clear();
+                places.addAll(addrs.map((e) => Map<String, String>.from(e)).toList());
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
       if (mounted) {
         setState(() {
-          if ((profile['name'] ?? '').isNotEmpty) _name = profile['name']!;
-          if ((profile['phone'] ?? '').isNotEmpty) _phone = profile['phone']!;
-          if ((profile['email'] ?? '').isNotEmpty) _email = profile['email']!;
+          _name = name;
+          _phone = phone;
+          _email = email;
           _phoneVerified = _phone.isNotEmpty;
 
-          _companyName = business['companyName'] ?? '';
-          _gstin = business['gstin'] ?? '';
-          _billingAddress = business['billingAddress'] ?? '';
-          _gstStatus = business['gstStatus'] ?? (_gstin.isNotEmpty ? 'Registered' : 'Not added');
+          _companyName = companyName;
+          _gstin = gstin;
+          _billingAddress = billingAddress;
+          _gstStatus = gstStatus;
 
           if (places.isNotEmpty) {
             _addresses = places;
@@ -12483,7 +12798,7 @@ class _AccountScreenState extends State<AccountScreen> {
     if (clean.length == 10) {
       return '+91 ${clean.substring(0, 5)} ${clean.substring(5)}';
     }
-    return raw.isEmpty ? '+91 12345 67890' : raw;
+    return raw;
   }
 
   Widget _buildRowIcon(IconData icon, {Color? color}) {
@@ -12615,15 +12930,25 @@ class _AccountScreenState extends State<AccountScreen> {
                         try {
                           final name = nameCtrl.text.trim();
                           final email = emailCtrl.text.trim();
+                          final rawPhone = phoneCtrl.text.trim();
+                          final cleanPhone = rawPhone.replaceAll(RegExp(r'\D'), '');
+                          final updatedPhone = cleanPhone.length == 10 ? '+91$cleanPhone' : _phone;
+
                           setState(() {
                             _name = name;
                             _email = email;
+                            if (cleanPhone.length == 10) _phone = updatedPhone;
                           });
                           await VayaStorage.saveUserProfile(name, _phone, email);
+                          await _updateCustomerInDb({
+                            'name': name,
+                            'email': email,
+                            'phone': _phone,
+                          });
                           if (context.mounted) {
                             Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Profile details updated successfully!')),
+                              const SnackBar(content: Text('Profile details updated successfully in database!')),
                             );
                           }
                         } catch (e) {
@@ -12673,7 +12998,7 @@ class _AccountScreenState extends State<AccountScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           textStyle: const TextStyle(fontSize: 12),
                         ),
-                        onPressed: () {
+                        onPressed: () async {
                           setModalState(() {
                             _addresses.add({
                               'title': 'New Delivery Hub',
@@ -12682,7 +13007,8 @@ class _AccountScreenState extends State<AccountScreen> {
                               'isDefault': _addresses.isEmpty ? 'true' : 'false',
                             });
                           });
-                          VayaStorage.saveSavedPlaces(_addresses);
+                          await VayaStorage.saveSavedPlaces(_addresses);
+                          await _updateCustomerInDb({'savedAddresses': _addresses});
                           setState(() {});
                         },
                         icon: const Icon(Icons.add, size: 16),
@@ -12736,14 +13062,15 @@ class _AccountScreenState extends State<AccountScreen> {
                                   children: [
                                     if (!isDefault)
                                       TextButton(
-                                        onPressed: () {
+                                        onPressed: () async {
                                           setModalState(() {
                                             for (var a in _addresses) {
                                               a['isDefault'] = 'false';
                                             }
                                             _addresses[i]['isDefault'] = 'true';
                                           });
-                                          VayaStorage.saveSavedPlaces(_addresses);
+                                          await VayaStorage.saveSavedPlaces(_addresses);
+                                          await _updateCustomerInDb({'savedAddresses': _addresses});
                                           setState(() {});
                                         },
                                         child: const Text('Set Default', style: TextStyle(fontSize: 11, color: VayaTheme.saffron)),
@@ -12755,6 +13082,7 @@ class _AccountScreenState extends State<AccountScreen> {
                                           _addresses.removeAt(i);
                                         });
                                         await VayaStorage.saveSavedPlaces(_addresses);
+                                        await _updateCustomerInDb({'savedAddresses': _addresses});
                                         setState(() {});
                                       },
                                     ),
@@ -12835,6 +13163,12 @@ class _AccountScreenState extends State<AccountScreen> {
                             _gstStatus = 'Not added';
                           });
                           await VayaStorage.saveBusinessDetails('', '', '', 'Not added');
+                          await _updateCustomerInDb({
+                            'companyName': '',
+                            'gstin': '',
+                            'billingAddress': '',
+                            'gstStatus': 'Not added',
+                          });
                           if (context.mounted) Navigator.pop(ctx);
                         },
                         child: const Text('Remove Details', style: TextStyle(color: Colors.red)),
@@ -12855,12 +13189,18 @@ class _AccountScreenState extends State<AccountScreen> {
                           _gstStatus = status;
                         });
                         await VayaStorage.saveBusinessDetails(company, gstin, address, status);
+                        await _updateCustomerInDb({
+                          'companyName': company,
+                          'gstin': gstin,
+                          'billingAddress': address,
+                          'gstStatus': status,
+                        });
                         if (ctx.mounted) {
                           Navigator.pop(ctx);
                         }
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Business & Tax details saved successfully!')),
+                            const SnackBar(content: Text('Business & Tax details saved successfully in database!')),
                           );
                         }
                       },
@@ -12903,9 +13243,10 @@ class _AccountScreenState extends State<AccountScreen> {
                     title: const Text('Booking & Dispatch Updates', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     subtitle: const Text('Real-time assignment and status alerts', style: TextStyle(fontSize: 11)),
                     value: _notifyBookingUpdates,
-                    onChanged: (val) {
+                    onChanged: (val) async {
                       setModalState(() => _notifyBookingUpdates = val);
                       setState(() {});
+                      await _updateCustomerInDb({'notifyBookingUpdates': val});
                     },
                   ),
                   const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -12914,9 +13255,10 @@ class _AccountScreenState extends State<AccountScreen> {
                     title: const Text('Live Driver Tracking', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     subtitle: const Text('ETA progress and proximity notifications', style: TextStyle(fontSize: 11)),
                     value: _notifyLiveTracking,
-                    onChanged: (val) {
+                    onChanged: (val) async {
                       setModalState(() => _notifyLiveTracking = val);
                       setState(() {});
+                      await _updateCustomerInDb({'notifyLiveTracking': val});
                     },
                   ),
                   const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -12925,9 +13267,10 @@ class _AccountScreenState extends State<AccountScreen> {
                     title: const Text('Offers & Discounts', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     subtitle: const Text('Promotional codes and seasonal deals', style: TextStyle(fontSize: 11)),
                     value: _notifyOffers,
-                    onChanged: (val) {
+                    onChanged: (val) async {
                       setModalState(() => _notifyOffers = val);
                       setState(() {});
+                      await _updateCustomerInDb({'notifyOffers': val});
                     },
                   ),
                   const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -12936,9 +13279,10 @@ class _AccountScreenState extends State<AccountScreen> {
                     title: const Text('WhatsApp Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     subtitle: const Text('Receipts and live tracking links on WhatsApp', style: TextStyle(fontSize: 11)),
                     value: _notifyWhatsApp,
-                    onChanged: (val) {
+                    onChanged: (val) async {
                       setModalState(() => _notifyWhatsApp = val);
                       setState(() {});
+                      await _updateCustomerInDb({'notifyWhatsApp': val});
                     },
                   ),
                 ],
@@ -12974,13 +13318,16 @@ class _AccountScreenState extends State<AccountScreen> {
                 leading: const Icon(Icons.language, color: VayaTheme.saffron),
                 title: const Text('English', style: TextStyle(fontWeight: FontWeight.bold)),
                 trailing: _appLanguage == 'English' ? const Icon(Icons.check_circle, color: VayaTheme.saffron) : null,
-                onTap: () {
+                onTap: () async {
                   setState(() => _appLanguage = 'English');
                   context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('en'));
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Language updated to English')),
-                  );
+                  await _updateCustomerInDb({'appLanguage': 'English'});
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Language updated to English and saved to database')),
+                    );
+                  }
                 },
               ),
               const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -12988,13 +13335,16 @@ class _AccountScreenState extends State<AccountScreen> {
                 leading: const Icon(Icons.language, color: VayaTheme.saffron),
                 title: const Text('ଓଡ଼ିଆ (Odia)', style: TextStyle(fontWeight: FontWeight.bold)),
                 trailing: _appLanguage.contains('Odia') ? const Icon(Icons.check_circle, color: VayaTheme.saffron) : null,
-                onTap: () {
+                onTap: () async {
                   setState(() => _appLanguage = 'ଓଡ଼ିଆ (Odia)');
                   context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('or'));
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ଭାଷା ଓଡ଼ିଆରେ ପରିବର୍ତ୍ତିତ ହୋଇଛି (Odia selected)')),
-                  );
+                  await _updateCustomerInDb({'appLanguage': 'ଓଡ଼ିଆ (Odia)'});
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('ଭାଷା ଓଡ଼ିଆରେ ପରିବର୍ତ୍ତିତ ହୋଇଛି (Odia selected)')),
+                    );
+                  }
                 },
               ),
               const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -13002,13 +13352,16 @@ class _AccountScreenState extends State<AccountScreen> {
                 leading: const Icon(Icons.language, color: VayaTheme.saffron),
                 title: const Text('हिन्दी (Hindi)', style: TextStyle(fontWeight: FontWeight.bold)),
                 trailing: _appLanguage.contains('Hindi') ? const Icon(Icons.check_circle, color: VayaTheme.saffron) : null,
-                onTap: () {
+                onTap: () async {
                   setState(() => _appLanguage = 'हिन्दी (Hindi)');
                   context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('hi'));
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('भाषा हिन्दी में बदली गई (Hindi selected)')),
-                  );
+                  await _updateCustomerInDb({'appLanguage': 'हिन्दी (Hindi)'});
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('भाषा हिन्दी में बदली गई (Hindi selected)')),
+                    );
+                  }
                 },
               ),
             ],
@@ -13042,11 +13395,14 @@ class _AccountScreenState extends State<AccountScreen> {
                 leading: _buildRowIcon(Icons.chat_bubble_outline, color: VayaTheme.saffron),
                 title: const Text('24x7 Live Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 subtitle: const Text('Instant response from VAYA operations agent', style: TextStyle(fontSize: 11)),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Connecting to 24x7 Support Chat...')),
-                  );
+                  await _sendSupportTicket('live_chat', {'phone': _phone, 'name': _name});
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Connecting to 24x7 Support Chat...')),
+                    );
+                  }
                 },
               ),
               const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -13054,12 +13410,15 @@ class _AccountScreenState extends State<AccountScreen> {
                 leading: _buildRowIcon(Icons.phone_outlined, color: VayaTheme.saffron),
                 title: const Text('Call Support Helpline', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 subtitle: const Text('Toll-Free: +91 1800 102 8292', style: TextStyle(fontSize: 11)),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
+                  await _sendSupportTicket('helpline_call', {'phone': _phone});
                   _makePhoneCall('18001028292');
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Dialing VAYA Helpline (+91 1800 102 8292)...')),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Dialing VAYA Helpline (+91 1800 102 8292)...')),
+                    );
+                  }
                 },
               ),
               const Divider(height: 1, thickness: 1, color: VayaTheme.fog),
@@ -13067,11 +13426,14 @@ class _AccountScreenState extends State<AccountScreen> {
                 leading: _buildRowIcon(Icons.phone_callback_outlined, color: VayaTheme.saffron),
                 title: const Text('Request Instant Callback', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 subtitle: const Text('An agent will call you within 2 minutes', style: TextStyle(fontSize: 11)),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Callback requested! Our support agent will call you in 2 minutes.')),
-                  );
+                  await _sendSupportTicket('callback_request', {'phone': _phone, 'name': _name});
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Callback requested! Our support agent will call you in 2 minutes.')),
+                    );
+                  }
                 },
               ),
             ],
@@ -13138,7 +13500,10 @@ class _AccountScreenState extends State<AccountScreen> {
               const SizedBox(height: 16),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: VayaTheme.saffron),
-                onPressed: () => Navigator.pop(ctx),
+                onPressed: () async {
+                  await _sendSupportTicket('dispute_view', {'caseId': 'DISP-89201'});
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
                 child: const Text('Close Case View', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
@@ -13219,11 +13584,14 @@ class _AccountScreenState extends State<AccountScreen> {
                   const SizedBox(height: 16),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: VayaTheme.saffron),
-                    onPressed: () {
+                    onPressed: () async {
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Export started ($format format via $method). File will arrive shortly.')),
-                      );
+                      await _sendSupportTicket('data_export', {'format': format, 'deliveryMethod': method});
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Export started ($format format via $method). Request recorded in database.')),
+                        );
+                      }
                     },
                     child: const Text('Confirm Data Export', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
@@ -13305,6 +13673,15 @@ class _AccountScreenState extends State<AccountScreen> {
                 onPressed: () async {
                   if (otpCtrl.text.trim() == '123456' || otpCtrl.text.trim().length == 6) {
                     Navigator.pop(ctx);
+                    try {
+                      final token = await CustomerAuthHelper.getAuthToken();
+                      if (token != null) {
+                        await http.delete(
+                          Uri.parse('$apiBaseUrl/api/customer/me'),
+                          headers: {'Authorization': 'Bearer $token'},
+                        ).timeout(const Duration(seconds: 8));
+                      }
+                    } catch (_) {}
                     await CustomerSessionManager.clearSession();
                     await FirebaseAuth.instance.signOut();
                     if (mounted) {

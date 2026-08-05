@@ -138,8 +138,8 @@ class RazorpayPaymentService {
         if (orderId.isNotEmpty) 'order_id': orderId,
         'description': purpose == 'dues_repayment' ? 'Driver Dues Repayment' : 'Platform Payment',
         'prefill': {
-          'contact': cleanPhone.isNotEmpty ? cleanPhone : '9876543210',
-          'name': userName.isNotEmpty ? userName : 'VAYA Partner',
+          'contact': cleanPhone,
+          'name': userName,
         },
       };
 

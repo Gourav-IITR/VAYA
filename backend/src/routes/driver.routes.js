@@ -4,8 +4,21 @@ import { query } from '../config/db.js';
 import { verifyToken } from '../middleware/auth.js';
 import { auth } from '../config/firebase.js';
 import { broadcast } from '../services/websocket.service.js';
+import { sendOrderStatusNotification } from '../services/notification.service.js';
 
 const router = express.Router();
+
+const getDistanceKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lng2 - lng1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
 
 // GET /api/driver/today-earnings - Fetch sum of earnings for completed bookings today
 router.get('/today-earnings', verifyToken, async (req, res) => {
@@ -89,9 +102,9 @@ router.get('/me', verifyToken, async (req, res) => {
     const uid = req.user.uid;
     let result = await query('SELECT * FROM drivers WHERE id = $1', [uid]);
     if (result.rows.length === 0) {
-      const phone = req.user.phone_number || req.user.email || `Driver-${uid.substring(0, 8)}`;
-      const name = req.user.name || 'Driver Partner';
-      const defaultReg = `OD-02-VAYA-${uid.substring(0, 4).toUpperCase()}`;
+      const phone = req.user.phone_number || req.user.email || '';
+      const name = req.user.name || '';
+      const defaultReg = '';
       result = await query(
         `INSERT INTO drivers (id, phone, name, vehicle_type, vehicle_reg, weight_capacity, status, is_approved)
          VALUES ($1, $2, $3, 'bike', $4, 20, 'offline', TRUE)
@@ -122,32 +135,23 @@ router.get('/by-phone/:phone', verifyToken, async (req, res) => {
   }
 });
 
-// POST /api/driver/status - Register driver or update online status
+// POST /api/driver/status - Register driver or update profile / online status
 router.post(
   '/status',
   verifyToken,
-  [
-    body('status').optional().isIn(['offline', 'online', 'busy']).withMessage('Invalid status')
-  ],
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     try {
       const uid = req.user.uid;
-      const { status, name, vehicleType, vehicleReg, weightCapacity, fcmToken } = req.body;
+      const { status, name, phone, email, appLanguage, vehicleType, vehicleReg, weightCapacity, fcmToken } = req.body;
       
       // Check if driver profile already exists
       const existingRes = await query('SELECT * FROM drivers WHERE id = $1', [uid]);
       const driverExists = existingRes.rows.length > 0;
-      const currentDriver = existingRes.rows[0];
 
       let driverData;
 
       if (driverExists) {
-        // Driver profile exists - Perform UPDATE to avoid re-evaluating unique constraints on phone / vehicle_reg
+        // Driver profile exists - Perform UPDATE
         const updateFields = [];
         const updateParams = [];
 
@@ -158,6 +162,18 @@ router.post(
         if (name !== undefined && name.trim().length > 0) {
           updateParams.push(name.trim());
           updateFields.push(`name = $${updateParams.length}`);
+        }
+        if (phone !== undefined && phone.trim().length > 0) {
+          updateParams.push(phone.trim());
+          updateFields.push(`phone = $${updateParams.length}`);
+        }
+        if (email !== undefined) {
+          updateParams.push(email.trim());
+          updateFields.push(`email = $${updateParams.length}`);
+        }
+        if (appLanguage !== undefined) {
+          updateParams.push(appLanguage);
+          updateFields.push(`app_language = $${updateParams.length}`);
         }
         if (vehicleType !== undefined) {
           updateParams.push(vehicleType);
@@ -191,27 +207,31 @@ router.post(
         const updateRes = await query(updateQuery, updateParams);
         driverData = updateRes.rows[0];
       } else {
-        // Driver profile does not exist - Perform INSERT with unique fallback defaults
-        const phone = req.user.phone_number || req.body.phone || `Driver-${uid.substring(0, 8)}`;
-        const nextName = (name && name.trim().length > 0) ? name.trim() : (req.user.name || 'Driver Partner');
+        // Driver profile does not exist - Perform INSERT
+        const nextPhone = (phone && phone.trim().length > 0) ? phone.trim() : (req.user.phone_number || '');
+        const nextName = (name && name.trim().length > 0) ? name.trim() : (req.user.name || '');
+        const nextEmail = (email && email.trim().length > 0) ? email.trim() : (req.user.email || null);
+        const nextLang = appLanguage || 'English';
         const nextVehType = vehicleType || 'bike';
-        const nextVehReg = (vehicleReg && vehicleReg.trim().length > 0) ? vehicleReg.trim().toUpperCase() : `OD-02-VAYA-${uid.substring(0, 4).toUpperCase()}`;
+        const nextVehReg = (vehicleReg && vehicleReg.trim().length > 0) ? vehicleReg.trim().toUpperCase() : '';
         const nextCap = weightCapacity ? parseInt(weightCapacity) : 20;
         const nextStatus = status || 'offline';
 
         const insertQuery = `
-          INSERT INTO drivers (id, phone, name, vehicle_type, vehicle_reg, weight_capacity, status, is_approved, fcm_token, last_active_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8, CURRENT_TIMESTAMP)
+          INSERT INTO drivers (id, phone, name, email, app_language, vehicle_type, vehicle_reg, weight_capacity, status, is_approved, fcm_token, last_active_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10, CURRENT_TIMESTAMP)
           ON CONFLICT (id)
           DO UPDATE SET 
             status = EXCLUDED.status,
+            name = EXCLUDED.name,
+            email = EXCLUDED.email,
             is_approved = TRUE,
             last_active_at = CURRENT_TIMESTAMP,
             fcm_token = COALESCE(EXCLUDED.fcm_token, drivers.fcm_token)
           RETURNING *
         `;
 
-        const insertRes = await query(insertQuery, [uid, phone, nextName, nextVehType, nextVehReg, nextCap, nextStatus, fcmToken || null]);
+        const insertRes = await query(insertQuery, [uid, nextPhone, nextName, nextEmail, nextLang, nextVehType, nextVehReg, nextCap, nextStatus, fcmToken || null]);
         driverData = insertRes.rows[0];
       }
 
@@ -232,6 +252,29 @@ router.post(
     }
   }
 );
+
+// POST /api/driver/support-ticket - Create driver support / vehicle change request ticket
+router.post('/support-ticket', verifyToken, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const { type, details } = req.body;
+    if (!type) {
+      return res.status(400).json({ error: 'Ticket type is required' });
+    }
+
+    const result = await query(
+      `INSERT INTO support_tickets (user_id, user_role, type, details, status)
+       VALUES ($1, 'driver', $2, $3::jsonb, 'open')
+       RETURNING *`,
+      [uid, type, JSON.stringify(details || {})]
+    );
+
+    res.json({ success: true, ticket: result.rows[0] });
+  } catch (err) {
+    console.error('POST /api/driver/support-ticket error:', err);
+    res.status(500).json({ error: 'Failed to create support ticket' });
+  }
+});
 
 // POST /api/driver/heartbeat - Driver app ping to keep presence active
 router.post(
@@ -287,6 +330,49 @@ router.post(
         lng: driverData.lng,
         status: driverData.status
       });
+
+      // Proximity & Wait-time Notification Checks for Active Booking
+      const activeBookingRes = await query(
+        `SELECT id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, arrived_pickup_at,
+                near_pickup_notified, free_wait_ending_notified, near_dropoff_notified
+         FROM bookings
+         WHERE driver_id = $1 AND status IN ('accepted', 'arrived_pickup', 'dropping_off')
+         LIMIT 1`,
+        [uid]
+      );
+
+      if (activeBookingRes.rows.length > 0) {
+        const activeBooking = activeBookingRes.rows[0];
+        const dLat = parseFloat(lat);
+        const dLng = parseFloat(lng);
+
+        // 1. Driver near pickup (<= 500m / 0.5km)
+        if (activeBooking.status === 'accepted' && !activeBooking.near_pickup_notified) {
+          const distKm = getDistanceKm(dLat, dLng, activeBooking.pickup_lat, activeBooking.pickup_lng);
+          if (distKm <= 0.5) {
+            await query('UPDATE bookings SET near_pickup_notified = TRUE WHERE id = $1', [activeBooking.id]);
+            sendOrderStatusNotification(activeBooking.id, 'driver_near_pickup');
+          }
+        }
+
+        // 2. Free pickup wait ending (>= 8 minutes after arrived_pickup_at, i.e. 2 mins left of 10 min free wait)
+        if (activeBooking.status === 'arrived_pickup' && activeBooking.arrived_pickup_at && !activeBooking.free_wait_ending_notified) {
+          const elapsedMins = (Date.now() - new Date(activeBooking.arrived_pickup_at).getTime()) / 60000;
+          if (elapsedMins >= 8.0) {
+            await query('UPDATE bookings SET free_wait_ending_notified = TRUE WHERE id = $1', [activeBooking.id]);
+            sendOrderStatusNotification(activeBooking.id, 'free_wait_ending');
+          }
+        }
+
+        // 3. Driver near drop-off (<= 500m / 0.5km)
+        if (activeBooking.status === 'dropping_off' && !activeBooking.near_dropoff_notified) {
+          const distKm = getDistanceKm(dLat, dLng, activeBooking.dropoff_lat, activeBooking.dropoff_lng);
+          if (distKm <= 0.5) {
+            await query('UPDATE bookings SET near_dropoff_notified = TRUE WHERE id = $1', [activeBooking.id]);
+            sendOrderStatusNotification(activeBooking.id, 'driver_near_dropoff');
+          }
+        }
+      }
 
       res.json({ success: true, driver: driverData });
     } catch (err) {

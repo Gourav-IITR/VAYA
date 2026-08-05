@@ -1,41 +1,6 @@
 import { LANDMARKS } from './mapData';
 
-// Initial Mock Drivers in case server isn't loaded yet
-const INITIAL_DRIVERS = [
-  {
-    id: 'driver-1',
-    name: 'Ramesh Kumar',
-    phone: '9876543210',
-    vehicleType: 'bike',
-    vehicleReg: 'OD-02-AX-1234',
-    weightCapacity: 20,
-    status: 'offline',
-    lat: 20.2720,
-    lng: 85.8420,
-  },
-  {
-    id: 'driver-2',
-    name: 'Suresh Mohanty',
-    phone: '9937123456',
-    vehicleType: 'mini_truck',
-    vehicleReg: 'OD-33-B-5678',
-    weightCapacity: 500,
-    status: 'offline',
-    lat: 20.3390,
-    lng: 85.8170,
-  },
-  {
-    id: 'driver-3',
-    name: 'Debashish Nayak',
-    phone: '9437890123',
-    vehicleType: 'large_truck',
-    vehicleReg: 'OD-02-C-9012',
-    weightCapacity: 2000,
-    status: 'offline',
-    lat: 20.2580,
-    lng: 85.7760,
-  }
-];
+const INITIAL_DRIVERS = [];
 
 // Client-side profile persistence helpers for offline fallback
 const getStoredCustomerProfiles = () => {

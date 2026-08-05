@@ -66,6 +66,7 @@ class _VayaLoaderState extends State<VayaLoader> with SingleTickerProviderStateM
   static const Color saffron = Color(0xFFF26430);
   static const Color cream = Color(0xFFF4EFE6);
   static const Color slate = Color(0xFF3C3A34);
+  static const Color inkBlack = Color(0xFF0E0E0C);
 
   @override
   void initState() {
@@ -131,7 +132,7 @@ class _VayaLoaderState extends State<VayaLoader> with SingleTickerProviderStateM
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: slate,
+              color: cream,
               letterSpacing: -0.2,
             ),
           ),
@@ -152,7 +153,7 @@ class _VayaLoaderState extends State<VayaLoader> with SingleTickerProviderStateM
 
     if (widget.variant == VayaLoaderVariant.fullscreen) {
       return Container(
-        color: cream.withValues(alpha: 0.92),
+        color: inkBlack.withValues(alpha: 0.95),
         alignment: Alignment.center,
         child: Material(
           type: MaterialType.transparency,
@@ -197,7 +198,7 @@ class _VayaScenePainter extends CustomPainter {
       ..cubicTo(124, 92, 148, 60, 172, 60);
 
     final bgPaint = Paint()
-      ..color = slate.withValues(alpha: 0.22)
+      ..color = Colors.white.withValues(alpha: 0.22)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.4
       ..strokeCap = StrokeCap.round;

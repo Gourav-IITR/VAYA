@@ -72,6 +72,23 @@ app.use('/api/payment', paymentRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/health', healthRouter);
 
+// Top-level state endpoint for web portal & public web dynamic synchronization
+app.get('/api/state', async (req, res) => {
+  try {
+    const driversRes = await query('SELECT id, name, phone, vehicle_type AS "vehicleType", vehicle_reg AS "vehicleReg", weight_capacity AS "weightCapacity", status, lat, lng FROM drivers');
+    const bookingsRes = await query('SELECT * FROM bookings ORDER BY created_at DESC LIMIT 50');
+    const customersRes = await query('SELECT * FROM customers');
+    res.json({
+      drivers: driversRes.rows,
+      bookings: bookingsRes.rows,
+      customers: customersRes.rows
+    });
+  } catch (err) {
+    console.error('GET /api/state error:', err);
+    res.status(500).json({ error: 'Failed to fetch state' });
+  }
+});
+
 // Direct top-level pricing config endpoint
 app.get('/api/pricing-config', async (req, res) => {
   try {
@@ -81,7 +98,10 @@ app.get('/api/pricing-config', async (req, res) => {
       base_price: parseFloat(r.base_price),
       base_distance: parseFloat(r.base_distance),
       per_km_price: parseFloat(r.per_km_price),
-      description: r.description || ''
+      description: r.description || '',
+      free_wait_minutes_pickup: parseInt(r.free_wait_minutes_pickup ?? 10),
+      free_wait_minutes_dropoff: parseInt(r.free_wait_minutes_dropoff ?? 10),
+      wait_charge_per_minute: parseFloat(r.wait_charge_per_minute ?? 2.00)
     }));
     res.json({ pricing });
   } catch (err) {

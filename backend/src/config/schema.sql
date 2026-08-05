@@ -8,15 +8,42 @@ CREATE TABLE IF NOT EXISTS customers (
     id VARCHAR(128) PRIMARY KEY, -- Firebase UID
     phone VARCHAR(15) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
+    email VARCHAR(255),
+    company_name VARCHAR(255),
+    gstin VARCHAR(50),
+    billing_address TEXT,
+    gst_status VARCHAR(50) DEFAULT 'Not added',
+    notify_booking_updates BOOLEAN DEFAULT TRUE,
+    notify_live_tracking BOOLEAN DEFAULT TRUE,
+    notify_offers BOOLEAN DEFAULT FALSE,
+    notify_whatsapp BOOLEAN DEFAULT TRUE,
+    app_language VARCHAR(50) DEFAULT 'English',
+    saved_addresses JSONB DEFAULT '[]'::jsonb,
+    account_status VARCHAR(30) DEFAULT 'active',
     fcm_token VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS gstin VARCHAR(50);
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_address TEXT;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS gst_status VARCHAR(50) DEFAULT 'Not added';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS notify_booking_updates BOOLEAN DEFAULT TRUE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS notify_live_tracking BOOLEAN DEFAULT TRUE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS notify_offers BOOLEAN DEFAULT FALSE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS notify_whatsapp BOOLEAN DEFAULT TRUE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS app_language VARCHAR(50) DEFAULT 'English';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS saved_addresses JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS account_status VARCHAR(30) DEFAULT 'active';
 
 -- Drivers Table
 CREATE TABLE IF NOT EXISTS drivers (
     id VARCHAR(128) PRIMARY KEY, -- Firebase UID
     phone VARCHAR(15) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
+    email VARCHAR(255),
+    app_language VARCHAR(50) DEFAULT 'English',
     vehicle_type VARCHAR(20) NOT NULL, -- 'bike', 'mini_truck', 'large_truck'
     vehicle_reg VARCHAR(30) UNIQUE NOT NULL,
     weight_capacity INT NOT NULL,
@@ -25,6 +52,20 @@ CREATE TABLE IF NOT EXISTS drivers (
     lng DOUBLE PRECISION,
     is_approved BOOLEAN DEFAULT FALSE,
     fcm_token VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS app_language VARCHAR(50) DEFAULT 'English';
+
+-- Support Tickets & Service Requests Table
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(128) NOT NULL,
+    user_role VARCHAR(20) NOT NULL, -- 'customer' or 'driver'
+    type VARCHAR(50) NOT NULL,      -- 'callback_request', 'dispute_case', 'data_export', 'vehicle_change', 'account_deletion'
+    details JSONB DEFAULT '{}'::jsonb,
+    status VARCHAR(30) DEFAULT 'open',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -112,6 +153,26 @@ ALTER TABLE bookings ADD COLUMN IF NOT EXISTS waiting_charge_pickup DECIMAL(10, 
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS waiting_charge_dropoff DECIMAL(10, 2) DEFAULT 0.00;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS total_waiting_charge DECIMAL(10, 2) DEFAULT 0.00;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS final_cost DECIMAL(10, 2);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_amount DECIMAL(10, 2);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_pickup_cash_collected BOOLEAN DEFAULT FALSE;
+
+-- Settlement Tracking & Idempotency Columns
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS settlement_id VARCHAR(64);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS settlement_version INT DEFAULT 1;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_collected_at_pickup DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid_online DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_due_now DECIMAL(10, 2) DEFAULT 0.00;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS support_override_approved BOOLEAN DEFAULT FALSE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+
+-- Notification State Tracking & Cancellation Metadata
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS near_pickup_notified BOOLEAN DEFAULT FALSE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS free_wait_ending_notified BOOLEAN DEFAULT FALSE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS near_dropoff_notified BOOLEAN DEFAULT FALSE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS additional_payment_notified BOOLEAN DEFAULT FALSE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancelled_by VARCHAR(128);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancelled_by_role VARCHAR(30);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_fee DECIMAL(10, 2) DEFAULT 0.00;
 
 -- Partner Ledgers Table (Unified Financial Ledger)
 CREATE TABLE IF NOT EXISTS partner_ledgers (

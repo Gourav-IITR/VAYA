@@ -29,6 +29,7 @@ dependencies:
   flutter_tts: ^4.2.5
   flutter_svg: ^2.0.10+1
   razorpay_flutter_customui: ^1.4.4
+  share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:

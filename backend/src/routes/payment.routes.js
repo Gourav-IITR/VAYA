@@ -6,6 +6,7 @@ import { query, pool } from '../config/db.js';
 import { verifyToken } from '../middleware/auth.js';
 import { evaluateDriverAccountStatus } from './ledger.routes.js';
 import { broadcastToUser } from '../services/websocket.service.js';
+import { sendOrderStatusNotification } from '../services/notification.service.js';
 
 const router = express.Router();
 
@@ -160,6 +161,12 @@ router.post(
       }
 
       await client.query('COMMIT');
+
+      if (paymentOrder.booking_id) {
+        sendOrderStatusNotification(paymentOrder.booking_id, 'payment_confirmed', {
+          amountPaid: paymentOrder.amount
+        });
+      }
 
       res.json({
         success: true,

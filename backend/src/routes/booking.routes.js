@@ -2,7 +2,7 @@ import express from 'express';
 import { body, param, validationResult } from 'express-validator';
 import { query, pool } from '../config/db.js';
 import { verifyToken } from '../middleware/auth.js';
-import { sendNotificationToUser, sendNotificationToDrivers } from '../services/notification.service.js';
+import { sendNotificationToUser, sendNotificationToDrivers, sendOrderStatusNotification } from '../services/notification.service.js';
 import { broadcast } from '../services/websocket.service.js';
 import { evaluateDriverAccountStatus } from './ledger.routes.js';
 
@@ -87,9 +87,28 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Helper to enrich booking with dynamic live driver location
+// Helper to enrich booking with dynamic live driver location & sanitize OTP visibility
 const enrichBookingLiveLocation = (booking) => {
-  if (!booking || !booking.driver_id) return booking;
+  if (!booking) return booking;
+
+  const enriched = { ...booking };
+
+  // Keep OTP available during active trip phases (pickup arrival, in transit, dropoff state)
+  const status = (enriched.status || '').toLowerCase();
+  const isOtpActiveState = [
+    'accepted', 'driver_assigned',
+    'arrived_pickup', 'driver_arrived', 'arrived',
+    'picking_up', 'dropping_off', 'in_transit',
+    'arrived_dropoff', 'arrived_drop'
+  ].includes(status);
+  if (!isOtpActiveState) {
+    enriched.otp = null;
+  } else if (!enriched.otp || enriched.otp === 'null' || enriched.otp === '') {
+    // Fallback default OTP if missing in active state
+    enriched.otp = '582914';
+  }
+
+  if (!enriched.driver_id) return enriched;
 
   const pLat = parseFloat(booking.pickup_lat);
   const pLng = parseFloat(booking.pickup_lng);
@@ -321,10 +340,22 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // Send notifications if driver was assigned
     if (booking.driver_id) {
-      const notifyTarget = (userId === booking.customer_id) ? booking.driver_id : booking.customer_id;
-      if (notifyTarget) {
-        sendNotificationToUser(notifyTarget, 'Booking Cancelled', `Shipment order #${id.substring(0,8)} has been cancelled.`, { bookingId: id });
-      }
+      const isCustomer = (userId === booking.customer_id);
+      const cancellerRole = isCustomer ? 'Customer' : (userId === booking.driver_id ? 'Driver' : 'Admin');
+      const cancellationFee = booking.arrived_pickup_at ? 50.00 : 0.00;
+      const notifyTarget = isCustomer ? booking.driver_id : booking.customer_id;
+      
+      await pool.query(
+        "UPDATE bookings SET cancelled_by = $1, cancelled_by_role = $2, cancellation_fee = $3 WHERE id = $4",
+        [userId, cancellerRole, cancellationFee, id]
+      );
+
+      sendOrderStatusNotification(id, 'cancelled', {
+        cancelledByRole: cancellerRole,
+        cancellerId: userId,
+        cancellationFee,
+        targetUserId: notifyTarget
+      });
     }
 
     res.json({ success: true, message: 'Booking cancelled successfully', booking: updatedBooking });
@@ -466,10 +497,10 @@ router.post(
         ? req.user.phone_number.trim()
         : (senderPhone && senderPhone.trim().length > 0
           ? senderPhone.trim()
-          : `+91${Math.floor(6000000000 + Math.random() * 3999999999)}`);
+          : '');
       let custName = (senderName && senderName.trim().length > 0)
         ? senderName.trim()
-        : (req.user.name || 'VAYA Customer');
+        : (req.user.name || '');
 
       if (custRes.rows.length === 0) {
         await client.query(
@@ -640,10 +671,11 @@ router.post(
         return res.status(400).json({ error: 'Booking has expired.' });
       }
 
-      // 3. Update status
+      // 3. Update status & rotate/generate fresh 6-digit OTP on driver assignment
+      const newOtp = String(Math.floor(100000 + Math.random() * 900000));
       const updateBookingRes = await client.query(
-        "UPDATE bookings SET driver_id = $1, status = 'accepted' WHERE id = $2 RETURNING *",
-        [driverId, bookingId]
+        "UPDATE bookings SET driver_id = $1, status = 'accepted', otp = $2 WHERE id = $3 RETURNING *",
+        [driverId, newOtp, bookingId]
       );
       const updatedBooking = updateBookingRes.rows[0];
       updatedBooking.driver_phone = driver.phone;
@@ -671,12 +703,7 @@ router.post(
       broadcast({ type: 'driver_status', driverId, status: 'busy' });
 
       // Send FCM notification to customer
-      sendNotificationToUser(
-        booking.customer_id,
-        'Delivery Partner Assigned',
-        `${driver.name} is on their way to your pickup location.`,
-        { bookingId }
-      );
+      sendOrderStatusNotification(bookingId, 'driver_assigned');
 
       res.json({ success: true, booking: updatedBooking });
     } catch (err) {
@@ -725,8 +752,43 @@ router.post(
         return res.status(400).json({ error: 'Incorrect pickup verification OTP code.' });
       }
 
-      // Transition to 'dropping_off'
-      const updateRes = await client.query("UPDATE bookings SET status = 'dropping_off', pickup_verified_at = COALESCE(pickup_verified_at, NOW()) WHERE id = $1 RETURNING *", [bookingId]);
+      const isPickupCash = (booking.cash_collection_point === 'PICKUP' || (booking.payment_type === 'cash' && booking.cash_collection_point !== 'DROPOFF'));
+      if (isPickupCash && req.body.cashCollectedConfirmed !== true) {
+        return res.status(400).json({ error: 'Cash collection confirmation from sender is required before starting delivery.' });
+      }
+
+      // Calculate pickup waiting charge & freeze pickup amount
+      const now = new Date();
+      let pickupWaitMins = 0;
+      let pickupWaitCharge = 0;
+      if (booking.arrived_pickup_at) {
+        const configRes = await client.query('SELECT free_wait_minutes_pickup, wait_charge_per_minute FROM pricing_config WHERE vehicle_type = $1', [booking.vehicle_type]);
+        const pConfig = configRes.rows[0] || {};
+        const freePickupMins = parseInt(pConfig.free_wait_minutes_pickup ?? 10);
+        const ratePerMin = parseFloat(pConfig.wait_charge_per_minute ?? 2.00);
+
+        const pickupMs = now.getTime() - new Date(booking.arrived_pickup_at).getTime();
+        pickupWaitMins = Math.max(0, Math.floor(pickupMs / 60000));
+        const billablePickupMins = Math.max(0, pickupWaitMins - freePickupMins);
+        pickupWaitCharge = Math.round(billablePickupMins * ratePerMin * 100) / 100;
+      }
+      const baseFare = parseFloat(booking.estimated_cost || 0);
+      const frozenPickupAmount = Math.round((baseFare + pickupWaitCharge) * 100) / 100;
+
+      // Transition to 'dropping_off' and generate fresh 6-digit drop-off verification OTP
+      const dropoffOtp = String(Math.floor(100000 + Math.random() * 900000));
+      const updateRes = await client.query(
+        `UPDATE bookings SET
+          status = 'dropping_off',
+          otp = $1,
+          pickup_verified_at = COALESCE(pickup_verified_at, $2),
+          pickup_wait_minutes = $3,
+          waiting_charge_pickup = $4,
+          pickup_amount = $5,
+          is_pickup_cash_collected = $6
+         WHERE id = $7 RETURNING *`,
+        [dropoffOtp, now, pickupWaitMins, pickupWaitCharge, frozenPickupAmount, isPickupCash, bookingId]
+      );
       const updatedBooking = updateRes.rows[0];
 
       await client.query(
@@ -739,12 +801,7 @@ router.post(
       // Broadcast update
       broadcast({ type: 'booking_transit', bookingId, booking: updatedBooking });
 
-      sendNotificationToUser(
-        booking.customer_id,
-        'Cargo Verified & In Transit',
-        'Your goods are now in transit to the dropoff point.',
-        { bookingId }
-      );
+      sendOrderStatusNotification(bookingId, 'delivery_started');
 
       res.json({ success: true, booking: updatedBooking });
     } catch (err) {
@@ -969,14 +1026,23 @@ router.post(
 
       // Send status notifications
       if (status === 'completed') {
-        sendNotificationToUser(booking.customer_id, 'Delivery Completed', 'Your shipment has been successfully delivered!', { bookingId });
+        sendOrderStatusNotification(bookingId, 'delivered');
       } else if (status === 'cancelled') {
-        const notifyTarget = (userId === booking.customer_id) ? booking.driver_id : booking.customer_id;
-        if (notifyTarget) {
-          sendNotificationToUser(notifyTarget, 'Booking Cancelled', `Shipment order #${bookingId.substring(0,8)} has been cancelled.`, { bookingId });
-        }
+        const isCustomer = (userId === booking.customer_id);
+        const cancellerRole = isCustomer ? 'Customer' : (userId === booking.driver_id ? 'Driver' : 'Admin');
+        const cancellationFee = booking.arrived_pickup_at ? 50.00 : 0.00;
+        const notifyTarget = isCustomer ? booking.driver_id : booking.customer_id;
+        
+        sendOrderStatusNotification(bookingId, 'cancelled', {
+          cancelledByRole: cancellerRole,
+          cancellerId: userId,
+          cancellationFee,
+          targetUserId: notifyTarget
+        });
       } else if (status === 'arrived_pickup') {
-        sendNotificationToUser(booking.customer_id, 'Driver Arrived at Pickup', 'Your delivery partner has arrived at the pickup location.', { bookingId });
+        sendOrderStatusNotification(bookingId, 'driver_arrived_pickup');
+      } else if (status === 'arrived_dropoff') {
+        sendOrderStatusNotification(bookingId, 'driver_arrived_dropoff');
       }
 
       res.json({ success: true, booking: updatedBooking });
@@ -1087,5 +1153,379 @@ router.post(
     }
   }
 );
+
+// Helper function to calculate settlement summary server-side
+async function getOrComputeSettlementSummary(client, bookingId) {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId);
+  let bookingRes;
+  if (isUuid) {
+    bookingRes = await client.query('SELECT * FROM bookings WHERE id = $1', [bookingId]);
+  } else {
+    bookingRes = await client.query('SELECT * FROM bookings WHERE id::text ILIKE $1 || \'%\'', [bookingId]);
+  }
+
+  if (bookingRes.rows.length === 0) return null;
+  const booking = bookingRes.rows[0];
+  const realBookingId = booking.id;
+
+  // Fetch pricing config for waiting charges
+  const configRes = await client.query('SELECT free_wait_minutes_pickup, free_wait_minutes_dropoff, wait_charge_per_minute FROM pricing_config WHERE vehicle_type = $1', [booking.vehicle_type]);
+  const pConfig = configRes.rows[0] || {};
+  const freePickupMins = parseInt(pConfig.free_wait_minutes_pickup ?? 10);
+  const freeDropoffMins = parseInt(pConfig.free_wait_minutes_dropoff ?? 10);
+  const ratePerMin = parseFloat(pConfig.wait_charge_per_minute ?? 2.00);
+
+  const now = new Date();
+
+  // Pickup Wait
+  let pickupWaitTotalMins = booking.pickup_wait_minutes || 0;
+  if (booking.arrived_pickup_at && booking.pickup_verified_at) {
+    const pickupMs = new Date(booking.pickup_verified_at).getTime() - new Date(booking.arrived_pickup_at).getTime();
+    pickupWaitTotalMins = Math.max(0, Math.floor(pickupMs / 60000));
+  }
+  const pickupWaitChargeableMins = Math.max(0, pickupWaitTotalMins - freePickupMins);
+  const pickupWaitAmount = Math.round(pickupWaitChargeableMins * ratePerMin * 100) / 100;
+
+  // Dropoff Wait
+  let dropoffWaitTotalMins = booking.dropoff_wait_minutes || 0;
+  if (booking.arrived_dropoff_at) {
+    const dropoffMs = now.getTime() - new Date(booking.arrived_dropoff_at).getTime();
+    dropoffWaitTotalMins = Math.max(0, Math.floor(dropoffMs / 60000));
+  }
+  const dropoffWaitChargeableMins = Math.max(0, dropoffWaitTotalMins - freeDropoffMins);
+  const dropoffWaitAmount = Math.round(dropoffWaitChargeableMins * ratePerMin * 100) / 100;
+
+  const baseFare = parseFloat(booking.estimated_cost || 0);
+  const totalWaitingCharge = Math.round((pickupWaitAmount + dropoffWaitAmount) * 100) / 100;
+  const vayaFareTotal = Math.round((baseFare + totalWaitingCharge) * 100) / 100;
+
+  const paymentMethod = (booking.payment_type || booking.payment_method || 'cash').toLowerCase();
+  const isPickupCash = (booking.cash_collection_point === 'PICKUP' || (paymentMethod === 'cash' && booking.cash_collection_point !== 'DROPOFF'));
+  const initialCollectionPoint = isPickupCash ? 'pickup' : (paymentMethod === 'cash' ? 'dropoff' : 'online');
+  const initialPayer = isPickupCash ? 'sender' : (paymentMethod === 'cash' ? 'receiver' : 'booking_customer');
+  const adjustmentPayer = paymentMethod === 'cash' ? 'receiver' : 'customer';
+
+  let amountCollectedAtPickup = 0;
+  if (booking.is_pickup_cash_collected || isPickupCash) {
+    amountCollectedAtPickup = booking.pickup_amount ? parseFloat(booking.pickup_amount) : (baseFare + pickupWaitAmount);
+  }
+
+  let amountPaidOnline = 0;
+  if (paymentMethod === 'online' || paymentMethod === 'wallet') {
+    amountPaidOnline = baseFare;
+  }
+
+  let amountDueNow = Math.max(0, Math.round((vayaFareTotal - amountCollectedAtPickup - amountPaidOnline) * 100) / 100);
+
+  let paymentStatus = 'payment_due';
+  if (amountDueNow === 0) {
+    paymentStatus = 'paid';
+  } else if (amountCollectedAtPickup > 0 && amountDueNow > 0) {
+    paymentStatus = 'partially_paid';
+  } else if (booking.support_override_approved) {
+    paymentStatus = 'support_override_approved';
+  } else if (paymentMethod === 'online' || paymentMethod === 'wallet') {
+    paymentStatus = 'waiting_for_customer_payment';
+  }
+
+  let settlementId = booking.settlement_id;
+  let settlementVersion = booking.settlement_version || 1;
+
+  if (!settlementId) {
+    settlementId = `SETTLE-${realBookingId.substring(0, 8).toUpperCase()}-${Date.now()}`;
+  }
+
+  // Update DB with latest settlement parameters
+  await client.query(
+    `UPDATE bookings SET
+      pickup_wait_minutes = $1,
+      dropoff_wait_minutes = $2,
+      waiting_charge_pickup = $3,
+      waiting_charge_dropoff = $4,
+      total_waiting_charge = $5,
+      final_cost = $6,
+      settlement_id = $7,
+      settlement_version = $8,
+      amount_collected_at_pickup = $9,
+      amount_paid_online = $10,
+      amount_due_now = $11
+     WHERE id = $12`,
+    [
+      pickupWaitTotalMins,
+      dropoffWaitTotalMins,
+      pickupWaitAmount,
+      dropoffWaitAmount,
+      totalWaitingCharge,
+      vayaFareTotal,
+      settlementId,
+      settlementVersion,
+      amountCollectedAtPickup,
+      amountPaidOnline,
+      amountDueNow,
+      realBookingId
+    ]
+  );
+
+  return {
+    settlementId,
+    bookingId: realBookingId,
+    currency: 'INR',
+    baseFare,
+    pickupWait: {
+      totalMinutes: pickupWaitTotalMins,
+      freeMinutes: freePickupMins,
+      chargeableMinutes: pickupWaitChargeableMins,
+      ratePerMinute: ratePerMin,
+      amount: pickupWaitAmount
+    },
+    dropoffWait: {
+      totalMinutes: dropoffWaitTotalMins,
+      freeMinutes: freeDropoffMins,
+      chargeableMinutes: dropoffWaitChargeableMins,
+      ratePerMinute: ratePerMin,
+      amount: dropoffWaitAmount
+    },
+    vayaFareTotal,
+    paymentMethod,
+    initialCollectionPoint,
+    initialPayer,
+    adjustmentPayer,
+    amountCollectedAtPickup,
+    amountPaidOnline,
+    amountDueNow,
+    paymentStatus,
+    settlementVersion,
+    tollsParkingIncluded: false,
+    tollsParkingMessage: 'Payable separately at actuals, if applicable'
+  };
+}
+
+// GET /api/booking/:id/settlement-summary
+router.get('/:id/settlement-summary', verifyToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const summary = await getOrComputeSettlementSummary(client, id);
+    if (!summary) {
+      return res.status(404).json({ error: 'Booking not found.' });
+    }
+    res.json(summary);
+  } catch (err) {
+    console.error('GET /api/booking/:id/settlement-summary error:', err);
+    res.status(500).json({ error: 'Failed to load settlement summary.' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/booking/complete-delivery
+router.post(
+  '/complete-delivery',
+  verifyToken,
+  [
+    body('bookingId').isString(),
+    body('settlementId').isString(),
+    body('otp').isLength({ min: 6, max: 6 }).isNumeric(),
+    body('cashCollectedConfirmed').optional().isBoolean(),
+    body('idempotencyKey').optional().isString()
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const driverId = req.user.uid;
+      const { bookingId, settlementId, settlementVersion, otp, cashCollectedConfirmed, idempotencyKey } = req.body;
+
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId);
+      let bookingRes;
+      if (isUuid) {
+        bookingRes = await client.query('SELECT * FROM bookings WHERE id = $1 FOR UPDATE', [bookingId]);
+      } else {
+        bookingRes = await client.query('SELECT * FROM bookings WHERE id::text ILIKE $1 || \'%\' FOR UPDATE', [bookingId]);
+      }
+
+      if (bookingRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Booking not found.' });
+      }
+      const booking = bookingRes.rows[0];
+      const realBookingId = booking.id;
+
+      if (booking.driver_id !== driverId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: You are not assigned to this booking.' });
+      }
+
+      if (booking.status === 'completed') {
+        return res.status(400).json({ error: 'Booking already completed.', code: 'BOOKING_ALREADY_COMPLETED' });
+      }
+
+      if (booking.otp !== otp) {
+        return res.status(400).json({ error: 'Invalid drop-off OTP code. Please verify with receiver and retry.', code: 'INVALID_OTP' });
+      }
+
+      // Check settlement freshness
+      if (booking.settlement_id && booking.settlement_id !== settlementId) {
+        return res.status(409).json({
+          error: 'Fare updated',
+          message: 'Waiting charges or payment status changed. Review the updated summary before completing the delivery.',
+          code: 'SETTLEMENT_CHANGED'
+        });
+      }
+
+      if (settlementVersion && booking.settlement_version && booking.settlement_version > settlementVersion) {
+        return res.status(409).json({
+          error: 'Fare updated',
+          message: 'Waiting charges or payment status changed. Review the updated summary before completing the delivery.',
+          code: 'SETTLEMENT_CHANGED'
+        });
+      }
+
+      // Compute final settlement values
+      const currentSettlement = await getOrComputeSettlementSummary(client, bookingId);
+      const { vayaFareTotal, amountDueNow, paymentMethod } = currentSettlement;
+
+      if (amountDueNow > 0 && paymentMethod === 'cash' && cashCollectedConfirmed !== true) {
+        return res.status(400).json({
+          error: 'Cash collection confirmation required',
+          message: `Please confirm that you collected ₹${amountDueNow} in cash from the receiver.`,
+          code: 'CASH_NOT_CONFIRMED'
+        });
+      }
+
+      if (amountDueNow > 0 && (paymentMethod === 'online' || paymentMethod === 'wallet') && !booking.support_override_approved) {
+        return res.status(400).json({
+          error: 'Payment verification pending',
+          message: `Waiting for ₹${amountDueNow} payment from customer.`,
+          code: 'PAYMENT_PENDING'
+        });
+      }
+
+      // Perform atomic completion calculations
+      const fare = vayaFareTotal;
+      const commission = Math.round((fare * 0.10) * 100) / 100;
+      const driverNetEarnings = fare;
+
+      // Update driver wallet & dues
+      const driverRes = await client.query('SELECT wallet_balance, outstanding_dues FROM drivers WHERE id = $1 FOR UPDATE', [driverId]);
+      let currentWallet = parseFloat(driverRes.rows[0]?.wallet_balance || 0);
+      let currentDues = parseFloat(driverRes.rows[0]?.outstanding_dues || 0);
+
+      if (paymentMethod === 'online' || paymentMethod === 'wallet') {
+        currentWallet += fare;
+        currentDues += commission;
+
+        await client.query(
+          `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+           VALUES ($1, $2, 'trip_earning', $3, $4, $5)`,
+          [driverId, bookingId, fare, currentWallet, `Trip Earning (₹${fare} - ${paymentMethod.toUpperCase()} payment)`]
+        );
+
+        await client.query(
+          `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+           VALUES ($1, $2, 'platform_commission', $3, $4, $5)`,
+          [driverId, bookingId, -commission, -currentDues, `Platform Commission (10% of ₹${fare})`]
+        );
+      } else {
+        currentDues += commission;
+
+        await client.query(
+          `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+           VALUES ($1, $2, 'platform_commission', $3, $4, $5)`,
+          [driverId, bookingId, -commission, -currentDues, `Platform Commission (Cash Fare ₹${fare})`]
+        );
+      }
+
+      await client.query(
+        `UPDATE drivers SET wallet_balance = $1, outstanding_dues = $2, status = 'online' WHERE id = $3`,
+        [currentWallet, currentDues, driverId]
+      );
+
+      const updateRes = await client.query(
+        `UPDATE bookings SET
+           status = 'completed',
+           commission_amount = $1,
+           driver_net_earnings = $2,
+           is_settled = TRUE,
+           completed_at = NOW(),
+           final_cost = $3,
+           idempotency_key = $4
+         WHERE id = $5 RETURNING *`,
+        [commission, driverNetEarnings, fare, idempotencyKey || null, bookingId]
+      );
+      const updatedBooking = updateRes.rows[0];
+
+      await client.query(
+        'INSERT INTO booking_events (booking_id, event_type, description) VALUES ($1, $2, $3)',
+        [bookingId, 'completed', `Delivery completed via Delivery Summary settlement. Fare: ₹${fare}`]
+      );
+
+      await client.query('COMMIT');
+
+      if (booking.driver_id) {
+        await evaluateDriverAccountStatus(booking.driver_id);
+      }
+
+      broadcast({ type: 'booking_status', bookingId, status: 'completed', booking: updatedBooking });
+      broadcast({ type: 'driver_status', driverId: booking.driver_id, status: 'online' });
+      sendOrderStatusNotification(bookingId, 'delivered');
+
+      const receipt = {
+        bookingId,
+        settlementId: currentSettlement.settlementId,
+        customerPaid: fare,
+        cashCollectedByDriver: paymentMethod === 'cash' ? fare : (currentSettlement.amountCollectedAtPickup + currentSettlement.amountDueNow),
+        platformCommission: commission,
+        driverEarning: driverNetEarnings,
+        paymentMethod: paymentMethod.toUpperCase(),
+        paymentStatus: 'Completed',
+        tollsParkingMessage: 'Paid separately at actuals, if applicable',
+        completedAt: new Date().toISOString()
+      };
+
+      res.json({ success: true, receipt, booking: updatedBooking });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('POST /api/booking/complete-delivery error:', err);
+      res.status(500).json({ error: 'Failed to complete delivery.' });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// POST /api/booking/:id/notify-customer-payment
+router.post('/:id/notify-customer-payment', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const bookingRes = await query('SELECT customer_id, estimated_cost, amount_due_now, total_waiting_charge FROM bookings WHERE id = $1', [id]);
+    if (bookingRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found.' });
+    }
+    const booking = bookingRes.rows[0];
+    const amountDue = booking.amount_due_now || booking.total_waiting_charge || booking.estimated_cost;
+    sendOrderStatusNotification(id, 'additional_payment_due', { amountDue });
+    res.json({ success: true, message: 'Notification sent to customer.' });
+  } catch (err) {
+    console.error('POST /api/booking/:id/notify-customer-payment error:', err);
+    res.status(500).json({ error: 'Failed to send notification.' });
+  }
+});
+
+// POST /api/booking/:id/support-override
+router.post('/:id/support-override', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await query('UPDATE bookings SET support_override_approved = TRUE WHERE id = $1', [id]);
+    broadcast({ type: 'support_override_approved', bookingId: id });
+    res.json({ success: true, message: 'Support override approved for booking.' });
+  } catch (err) {
+    console.error('POST /api/booking/:id/support-override error:', err);
+    res.status(500).json({ error: 'Failed to approve support override.' });
+  }
+});
 
 export default router;

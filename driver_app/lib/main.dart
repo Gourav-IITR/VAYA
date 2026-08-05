@@ -18,6 +18,7 @@ import 'widgets/payment_method_sheet.dart';
 import 'services/razorpay_service.dart';
 import 'utils/vehicle_icon_helper.dart';
 import 'widgets/vaya_loader.dart';
+import 'screens/delivery_summary_screen.dart';
 
 /// Helper function to launch phone calls across devices & web
 Future<void> _makeDriverPhoneCall(String phoneNumber) async {
@@ -142,6 +143,15 @@ class DriverStorage {
       await prefs.setString('driver_cached_ledger', json.encode(ledgerData));
     } catch (e) {
       debugPrint('Error saving cached driver ledger: $e');
+    }
+  }
+
+  static Future<void> saveCachedProfile(Map<String, dynamic> profile) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('driver_cached_profile', json.encode(profile));
+    } catch (e) {
+      debugPrint('Error saving cached profile: $e');
     }
   }
 
@@ -587,10 +597,21 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
   }
 
   Future<void> _initSession() async {
+    final startTime = DateTime.now();
+
+    Future<void> ensureMinLoaderTime() async {
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      const minDisplayMs = 1200;
+      if (elapsed < minDisplayMs) {
+        await Future.delayed(Duration(milliseconds: minDisplayMs - elapsed));
+      }
+    }
+
     // 1. Check local disk session FIRST for instant cold-start auto-login
     final saved = await DriverSessionManager.getSavedSession();
     if (saved != null) {
-      debugPrint('[VAYA] Cold Start: Saved driver session found. Auto-logging driver partner in instantly.');
+      debugPrint('[VAYA] Cold Start: Saved driver session found. Auto-logging driver partner in.');
+      await ensureMinLoaderTime();
       if (mounted) {
         setState(() {
           _driverData = saved;
@@ -616,8 +637,9 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
     }
 
     if (user != null) {
-      await _syncSessionWithUser(user);
+      await _syncSessionWithUser(user, startTime);
     } else {
+      await ensureMinLoaderTime();
       if (mounted) {
         setState(() {
           _loading = false;
@@ -626,7 +648,15 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
     }
   }
 
-  Future<void> _syncSessionWithUser(User user) async {
+  Future<void> _syncSessionWithUser(User user, DateTime startTime) async {
+    Future<void> ensureMinLoaderTime() async {
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      const minDisplayMs = 1200;
+      if (elapsed < minDisplayMs) {
+        await Future.delayed(Duration(milliseconds: minDisplayMs - elapsed));
+      }
+    }
+
     try {
       final token = await user.getIdToken(true);
       if (token != null && token.isNotEmpty) {
@@ -641,6 +671,7 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
           if (data['exists'] == true && data['driver'] != null) {
             final driver = data['driver'];
             await DriverSessionManager.saveSession(driver, token: token);
+            await ensureMinLoaderTime();
             if (mounted) {
               setState(() {
                 _driverData = driver;
@@ -663,6 +694,7 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
       'is_approved': true,
     };
     await DriverSessionManager.saveSession(defaultDriver);
+    await ensureMinLoaderTime();
     if (mounted) {
       setState(() {
         _driverData = defaultDriver;
@@ -719,7 +751,7 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
-        backgroundColor: VayaDriverTheme.signalCream,
+        backgroundColor: VayaDriverTheme.inkBlack,
         body: Center(
           child: VayaLoader.section(size: 120, message: 'Verifying Driver Portal...'),
         ),
@@ -1379,8 +1411,65 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
   GoogleMapController? _mapController;
   IOWebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription<RemoteMessage>? _fcmSubscription;
   DateTime? _lastLocationSyncTime;
   bool _showDemandAreas = false;
+
+  List<dynamic> _serverPricing = [];
+
+  Future<void> _fetchPricingConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString('vaya_cached_pricing_config');
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = json.decode(raw);
+        if (mounted) {
+          setState(() {
+            _serverPricing = decoded['pricing'] ?? [];
+          });
+        }
+      }
+    } catch (_) {}
+
+    try {
+      var response = await http.get(Uri.parse('$apiBaseUrl/api/pricing-config')).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        response = await http.get(Uri.parse('$apiBaseUrl/api/booking/pricing-config')).timeout(const Duration(seconds: 15));
+      }
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _serverPricing = data['pricing'] ?? [];
+          });
+        }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('vaya_cached_pricing_config', json.encode(data));
+      }
+    } catch (e) {
+      debugPrint('Driver pricing fetch error: $e');
+    }
+  }
+
+  Map<String, dynamic> _getWaitingConfigForVehicle(String? vehicleType) {
+    final targetType = vehicleType ?? widget.driverData['vehicle_type'] ?? 'bike';
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == targetType,
+          orElse: () => null,
+        );
+        if (match != null) {
+          return {
+            'free_pickup': int.tryParse(match['free_wait_minutes_pickup']?.toString() ?? '') ?? 10,
+            'free_dropoff': int.tryParse(match['free_wait_minutes_dropoff']?.toString() ?? '') ?? 10,
+            'rate': double.tryParse(match['wait_charge_per_minute']?.toString() ?? '') ?? 2.0,
+          };
+        }
+      } catch (_) {}
+    }
+    return {'free_pickup': 10, 'free_dropoff': 10, 'rate': 2.0};
+  }
 
   Map<String, dynamic>? _incomingAlert;
   Timer? _alertTimer;
@@ -1430,17 +1519,40 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
     return '$greeting, $firstName';
   }
 
+  int _getNotificationIdForBooking(dynamic bookingId) {
+    final String idStr = (bookingId ?? '0').toString();
+    if (idStr.isEmpty) return 999;
+    int hash = 0;
+    for (int i = 0; i < idStr.length; i++) {
+      hash = (31 * hash + idStr.codeUnitAt(i)) & 0x7FFFFFFF;
+    }
+    return (hash % 900000) + 1000;
+  }
+
   String _cleanAddress(String raw) {
     if (raw.isEmpty) return raw;
-    return raw
-        .replaceAll(RegExp(r',?\s*Odisha', caseSensitive: false), '')
-        .replaceAll(RegExp(r',?\s*\d{6}', caseSensitive: false), '')
-        .replaceAll(RegExp(r',?\s*India', caseSensitive: false), '')
-        .replaceAll(RegExp(r',\s*,', caseSensitive: false), ',')
-        .trim();
+    List<String> parts = raw.split(',');
+    List<String> cleanedParts = [];
+    for (var part in parts) {
+      String p = part.trim();
+      if (p.isEmpty) continue;
+      if (RegExp(r'^(Odisha|India|\d{6})$', caseSensitive: false).hasMatch(p)) continue;
+      p = p.replaceAll(RegExp(r'\b(Odisha|India|\d{6})\b', caseSensitive: false), '').trim();
+      if (p.isNotEmpty && !cleanedParts.contains(p)) {
+        cleanedParts.add(p);
+      }
+    }
+    if (cleanedParts.length > 2) {
+      cleanedParts = cleanedParts.sublist(0, 2);
+    }
+    return cleanedParts.join(', ');
   }
 
   void _startAlertTimer(Map<String, dynamic> booking) {
+    if (booking['estimated_cost'] == null && booking['pickup_name'] == null) {
+      debugPrint("Ignoring incomplete booking alert payload: $booking");
+      return;
+    }
     _alertTimer?.cancel();
     if (mounted) {
       setState(() {
@@ -1453,7 +1565,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
     _alertTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_alertCountdown <= 1) {
         timer.cancel();
-        _cancelOrderNotification();
+        final String bId = (booking['id'] ?? booking['bookingId'] ?? '').toString();
+        _cancelOrderNotification(bId);
         if (mounted) {
           setState(() {
             _incomingAlert = null;
@@ -1469,10 +1582,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
     });
   }
 
-  void _clearAlert() {
+  void _clearAlert([String? bookingId]) {
     _alertTimer?.cancel();
     _alertTimer = null;
-    _cancelOrderNotification();
+    _cancelOrderNotification(bookingId);
     if (mounted) {
       setState(() {
         _incomingAlert = null;
@@ -1482,12 +1595,34 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
 
   Future<void> _showOrderRequestPushNotification(Map<String, dynamic> booking) async {
     try {
-      final String cost = (booking['estimated_cost'] ?? '0').toString();
+      final String bookingId = (booking['id'] ?? booking['bookingId'] ?? '0').toString();
+      final int notifId = _getNotificationIdForBooking(bookingId);
+
+      final String rawCost = (booking['estimated_cost'] ?? '0').toString();
+      final double costVal = double.tryParse(rawCost) ?? 0.0;
+      final String costFormatted = costVal > 0 ? costVal.toStringAsFixed(2) : rawCost;
+
       final String pickup = _cleanAddress((booking['pickup_name'] ?? '').toString());
       final String dropoff = _cleanAddress((booking['dropoff_name'] ?? '').toString());
-      final String weight = (booking['weight'] ?? '0').toString();
-      final String vehicle = (booking['vehicle_type'] ?? 'Bike').toString();
-      final String payment = (booking['payment_method'] ?? 'Cash on Delivery').toString();
+
+      double distKm = 1.1;
+      int etaMin = 3;
+      if (_currentPosition != null && booking['pickup_lat'] != null && booking['pickup_lng'] != null) {
+        final meters = Geolocator.distanceBetween(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+          (booking['pickup_lat'] as num).toDouble(),
+          (booking['pickup_lng'] as num).toDouble(),
+        );
+        distKm = meters / 1000.0;
+        etaMin = (distKm * 3.0 + 1.0).round().clamp(1, 30);
+      } else if (booking['distance_km'] != null) {
+        distKm = double.tryParse(booking['distance_km'].toString()) ?? 1.1;
+        etaMin = (distKm * 3.0 + 1.0).round().clamp(1, 30);
+      }
+
+      final String title = 'New delivery · ₹$costFormatted';
+      final String body = 'Pickup: $pickup\nDrop-off: $dropoff\n${distKm.toStringAsFixed(1)} km delivery · Pickup $etaMin min away';
 
       final androidDetails = AndroidNotificationDetails(
         'vaya_order_requests',
@@ -1495,17 +1630,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
         channelDescription: 'High-priority notifications for new trip requests with accept and decline actions',
         importance: Importance.max,
         priority: Priority.high,
-        ticker: 'New Trip Request',
+        ticker: title,
         playSound: true,
         enableVibration: true,
         category: AndroidNotificationCategory.call,
         fullScreenIntent: true,
         color: const Color(0xFFF26430),
+        colorized: true,
         icon: '@mipmap/ic_launcher',
+        onlyAlertOnce: false,
         actions: const <AndroidNotificationAction>[
           AndroidNotificationAction(
             'accept_trip',
-            'ACCEPT TRIP',
+            'ACCEPT',
             showsUserInterface: true,
             cancelNotification: true,
           ),
@@ -1519,11 +1656,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
       );
 
       final notificationDetails = NotificationDetails(android: androidDetails);
-      final String title = 'New Trip Request • ₹$cost';
-      final String body = 'Pickup: $pickup\nDropoff: $dropoff\nDetails: $weight kg · $vehicle · $payment';
 
       await _notificationsPlugin.show(
-        _requestNotificationId,
+        notifId,
         title,
         body,
         notificationDetails,
@@ -1534,12 +1669,74 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
     }
   }
 
-  Future<void> _cancelOrderNotification() async {
+  Future<void> _cancelOrderNotification([String? bookingId]) async {
     try {
-      await _notificationsPlugin.cancel(_requestNotificationId);
+      if (bookingId != null && bookingId.isNotEmpty) {
+        await _notificationsPlugin.cancel(_getNotificationIdForBooking(bookingId));
+      } else if (_incomingAlert != null) {
+        final String bId = (_incomingAlert!['id'] ?? _incomingAlert!['bookingId'] ?? '').toString();
+        if (bId.isNotEmpty) {
+          await _notificationsPlugin.cancel(_getNotificationIdForBooking(bId));
+        }
+      } else {
+        await _notificationsPlugin.cancel(999);
+      }
     } catch (e) {
       debugPrint("Error cancelling order notification: $e");
     }
+  }
+
+  void _showDeclineReasonDialog(String bookingId) {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final reasons = [
+          'Pickup location is too far',
+          'Fare is too low for distance',
+          'Vehicle not suitable for cargo',
+          'Taking a personal break',
+          'Other reason'
+        ];
+        return Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Reason for declining (Optional)',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
+              ),
+              const SizedBox(height: 12),
+              ...reasons.map((reason) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(reason, style: const TextStyle(color: Colors.white70, fontSize: 14, fontFamily: 'Inter')),
+                trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Decline recorded: $reason'), duration: const Duration(seconds: 2)),
+                  );
+                },
+              )),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Skip', style: TextStyle(color: Color(0xFF9CA3AF), fontFamily: 'Inter')),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Timer? _refreshTimer;
@@ -1560,6 +1757,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
       _startHeartbeat();
     }
     _initNotifications();
+    _fetchPricingConfig();
     _loadCachedTodayEarningsFirst();
     _fetchTodayEarnings();
     _fetchDriverStatus();
@@ -1668,10 +1866,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
             final String? bookingId = (data['id'] ?? data['bookingId'])?.toString();
             if (actionId == 'accept_trip' && bookingId != null) {
               await _acceptJob(bookingId);
-              await _cancelOrderNotification();
+              await _cancelOrderNotification(bookingId);
             } else if (actionId == 'decline_trip') {
-              _clearAlert();
-              await _cancelOrderNotification();
+              _clearAlert(bookingId);
+              await _cancelOrderNotification(bookingId);
+              if (bookingId != null) {
+                _showDeclineReasonDialog(bookingId);
+              }
+            } else {
+              if (_isOnline && data is Map<String, dynamic>) {
+                _startAlertTimer(data);
+              }
             }
           } catch (e) {
             debugPrint("Error handling notification CTA: $e");
@@ -1687,11 +1892,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
     }
 
     try {
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _fcmSubscription?.cancel();
+      _fcmSubscription = FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         if (message.data.isNotEmpty) {
           final data = message.data;
-          if (data['type'] == 'booking_created' || data['bookingId'] != null || data['id'] != null) {
-            if (_isOnline) {
+          // Strictly filter for new booking creation events with valid details
+          if (data['type'] == 'booking_created') {
+            final bool hasActiveTrip = widget.driverData['active_job'] != null;
+            if (_isOnline && !hasActiveTrip && data['estimated_cost'] != null) {
               _startAlertTimer(data);
             }
           }
@@ -2278,7 +2486,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
         
         if (data['type'] == 'booking_created') {
           final booking = data['booking'];
-          if (booking['vehicle_type'] == widget.driverData['vehicle_type'] && _isOnline) {
+          final bool hasActiveTrip = widget.driverData['active_job'] != null;
+          if (booking != null && booking['vehicle_type'] == widget.driverData['vehicle_type'] && _isOnline && !hasActiveTrip) {
             if (_currentPosition != null && booking['pickup_lat'] != null) {
               final double dist = Geolocator.distanceBetween(
                 _currentPosition!.latitude,
@@ -2294,13 +2503,26 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
             }
           }
         } else if (data['type'] == 'booking_status' && data['status'] == 'cancelled') {
-          if (_incomingAlert != null && _incomingAlert!['id'] == data['bookingId']) {
-            _clearAlert();
+          final String bId = (data['bookingId'] ?? '').toString();
+          _cancelOrderNotification(bId);
+          if (_incomingAlert != null && (_incomingAlert!['id'] ?? _incomingAlert!['bookingId']) == bId) {
+            _clearAlert(bId);
           }
         } else if (data['type'] == 'booking_accepted') {
-          if (_incomingAlert != null && _incomingAlert!['id'] == data['bookingId']) {
-            _clearAlert();
+          final String bId = (data['bookingId'] ?? '').toString();
+          _cancelOrderNotification(bId);
+          if (_incomingAlert != null && (_incomingAlert!['id'] ?? _incomingAlert!['bookingId']) == bId) {
+            _clearAlert(bId);
           }
+        } else if (data['type'] == 'pricing_updated' && data['pricing'] != null) {
+          if (mounted) {
+            setState(() {
+              _serverPricing = data['pricing'] ?? [];
+            });
+          }
+          SharedPreferences.getInstance().then((prefs) {
+            prefs.setString('vaya_cached_pricing_config', json.encode(data));
+          });
         }
       });
     } catch (e) {
@@ -2364,6 +2586,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
 
   @override
   void dispose() {
+    _fcmSubscription?.cancel();
     _progressAnimController.dispose();
     _refreshTimer?.cancel();
     _heartbeatTimer?.cancel();
@@ -2966,217 +3189,210 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
                   left: 0,
                   right: 0,
                   child: Container(
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF141414),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                      border: Border(
-                        top: BorderSide(color: VayaDriverTheme.saffron, width: 2),
-                        left: BorderSide(color: VayaDriverTheme.saffron, width: 2),
-                        right: BorderSide(color: VayaDriverTheme.saffron, width: 2),
-                      ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1A17),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                      border: Border.all(color: VayaDriverTheme.saffron.withValues(alpha: 0.8), width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: VayaDriverTheme.saffron.withValues(alpha: 0.15),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ],
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Header Tag & Timer Badge
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: VayaDriverTheme.saffron.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: VayaDriverTheme.saffron, width: 1.2),
-                                ),
-                                child: const Text(
-                                  'NEW CARGO REQUEST',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 11,
-                                    color: VayaDriverTheme.saffron,
-                                    fontFamily: 'Inter',
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.redAccent.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.redAccent, width: 1),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.timer_outlined, color: Colors.redAccent, size: 14),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '${_alertCountdown}s',
-                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent, fontFamily: 'Inter'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
+                      child: Builder(
+                        builder: (_) {
+                          final String bId = (_incomingAlert!['id'] ?? _incomingAlert!['bookingId'] ?? '').toString();
+                          final String rawCost = (_incomingAlert!['estimated_cost'] ?? '0').toString();
+                          final double costVal = double.tryParse(rawCost) ?? 0.0;
+                          final String costFormatted = costVal > 0 ? costVal.toStringAsFixed(2) : rawCost;
+                          final String pickupStr = _cleanAddress(_incomingAlert!['pickup_name'] ?? '');
+                          final String dropoffStr = _cleanAddress(_incomingAlert!['dropoff_name'] ?? '');
 
-                          // Fare & Payment Mode Row
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
+                          double distKm = 1.1;
+                          int etaMin = 3;
+                          if (_currentPosition != null && _incomingAlert!['pickup_lat'] != null && _incomingAlert!['pickup_lng'] != null) {
+                            final meters = Geolocator.distanceBetween(
+                              _currentPosition!.latitude,
+                              _currentPosition!.longitude,
+                              (_incomingAlert!['pickup_lat'] as num).toDouble(),
+                              (_incomingAlert!['pickup_lng'] as num).toDouble(),
+                            );
+                            distKm = meters / 1000.0;
+                            etaMin = (distKm * 3.0 + 1.0).round().clamp(1, 30);
+                          } else if (_incomingAlert!['distance_km'] != null) {
+                            distKm = double.tryParse(_incomingAlert!['distance_km'].toString()) ?? 1.1;
+                            etaMin = (distKm * 3.0 + 1.0).round().clamp(1, 30);
+                          }
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              // Header Tag, Title (16-18px), & Timer Badge
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text(
-                                    'EARNINGS',
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF), fontFamily: 'Inter'),
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(6),
+                                          decoration: BoxDecoration(
+                                            color: VayaDriverTheme.saffron.withValues(alpha: 0.2),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.local_shipping_outlined, color: VayaDriverTheme.saffron, size: 18),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            'New delivery · ₹$costFormatted',
+                                            style: const TextStyle(
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              fontFamily: 'Inter',
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  Text(
-                                    '₹${_incomingAlert!['estimated_cost']}',
-                                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: VayaDriverTheme.saffron, fontFamily: 'Inter'),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.redAccent.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: Colors.redAccent, width: 1),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.timer_outlined, color: Colors.redAccent, size: 14),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${_alertCountdown}s',
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent, fontFamily: 'Inter'),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF222224),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF333336)),
-                                ),
-                                child: const Text(
-                                  'Cash on Delivery',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white, fontFamily: 'Inter'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const Divider(color: Color(0xFF2C2C2E), height: 24),
+                              const SizedBox(height: 16),
 
-                          // Pickup Distance & Locality
-                          Builder(
-                            builder: (_) {
-                              double distKm = 0.0;
-                              int etaMin = 0;
-                              if (_currentPosition != null && _incomingAlert!['pickup_lat'] != null) {
-                                final meters = Geolocator.distanceBetween(
-                                  _currentPosition!.latitude,
-                                  _currentPosition!.longitude,
-                                  (_incomingAlert!['pickup_lat'] as num).toDouble(),
-                                  (_incomingAlert!['pickup_lng'] as num).toDouble(),
-                                );
-                                distKm = meters / 1000.0;
-                                etaMin = (distKm * 3.0 + 2.0).round();
-                              }
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              // Route Information
+                              Container(
+                                padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF1E1E20),
-                                  borderRadius: BorderRadius.circular(10),
+                                  color: const Color(0xFF262320),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFF38332E)),
                                 ),
-                                child: Row(
+                                child: Column(
                                   children: [
-                                    const Icon(Icons.navigation_outlined, color: VayaDriverTheme.saffron, size: 18),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '${distKm.toStringAsFixed(1)} km to pickup · $etaMin min ETA',
-                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: VayaDriverTheme.saffron, fontFamily: 'Inter'),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.circle, color: VayaDriverTheme.routeGreen, size: 10),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            'Pickup: $pickupStr',
+                                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.location_on, color: Colors.redAccent, size: 12),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Drop-off: $dropoffStr',
+                                            style: const TextStyle(fontSize: 14, color: Color(0xFFD0D0D0), fontFamily: 'Inter'),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const Divider(color: Color(0xFF38332E), height: 20),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.navigation_outlined, color: VayaDriverTheme.saffron, size: 16),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '${distKm.toStringAsFixed(1)} km delivery · Pickup $etaMin min away',
+                                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: VayaDriverTheme.saffron, fontFamily: 'Inter'),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Locality Addresses
-                          Row(
-                            children: [
-                              const Icon(Icons.circle, color: VayaDriverTheme.routeGreen, size: 10),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Pickup: ${_cleanAddress(_incomingAlert!['pickup_name'] ?? '')}',
-                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on, color: Colors.redAccent, size: 12),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Dropoff: ${_cleanAddress(_incomingAlert!['dropoff_name'] ?? '')}',
-                                  style: const TextStyle(fontSize: 14, color: Color(0xFFA0A0A0), fontFamily: 'Inter'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
+                              const SizedBox(height: 20),
 
-                          // Parcel / Vehicle Fit Details
-                          Row(
-                            children: [
-                              const Icon(Icons.inventory_2_outlined, color: Color(0xFF9CA3AF), size: 14),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Weight: ${_incomingAlert!['weight']} kg · Vehicle: ${_incomingAlert!['vehicle_type'] ?? 'Bike'}',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF), fontFamily: 'Inter'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-
-                          // Large Accept / Decline Actions
-                          Row(
-                            children: [
-                              Expanded(
-                                child: SizedBox(
-                                  height: 48,
-                                  child: OutlinedButton(
-                                    style: OutlinedButton.styleFrom(
-                                      side: const BorderSide(color: Colors.redAccent),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              // Two Full-Width Actions: ACCEPT (Route Green) & DECLINE (Mist Grey / Alert Red)
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: SizedBox(
+                                      height: 50,
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF2C2C2E),
+                                          foregroundColor: const Color(0xFFEF4444),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            side: const BorderSide(color: Color(0xFF3A3A3C)),
+                                          ),
+                                        ),
+                                        onPressed: () {
+                                          _clearAlert(bId);
+                                          if (bId.isNotEmpty) {
+                                            _showDeclineReasonDialog(bId);
+                                          }
+                                        },
+                                        child: const Text('DECLINE', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14, fontFamily: 'Inter')),
+                                      ),
                                     ),
-                                    onPressed: _clearAlert,
-                                    child: const Text('Decline', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontFamily: 'Inter')),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                flex: 2,
-                                child: SizedBox(
-                                  height: 48,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: VayaDriverTheme.saffron,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 2,
+                                    child: SizedBox(
+                                      height: 50,
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: VayaDriverTheme.routeGreen,
+                                          foregroundColor: Colors.white,
+                                          elevation: 2,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                        ),
+                                        onPressed: (_isAcceptingJob || _incomingAlert == null) ? null : () => _acceptJob(bId),
+                                        child: _isAcceptingJob
+                                            ? const VayaLoader.inline(size: 20, color: Colors.white)
+                                            : const Text('ACCEPT', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'Inter')),
+                                      ),
                                     ),
-                                    onPressed: (_isAcceptingJob || _incomingAlert == null) ? null : () => _acceptJob(_incomingAlert!['id']),
-                                    child: _isAcceptingJob
-                                        ? const VayaLoader.inline(size: 20, color: Colors.white)
-                                        : const Text('ACCEPT TRIP', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'Inter')),
                                   ),
-                                ),
+                                ],
                               ),
                             ],
-                          ),
-                        ],
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -3278,6 +3494,61 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   late Map<String, dynamic> _job;
   StreamSubscription<Position>? _positionSubscription;
   Position? _currentPosition;
+  List<dynamic> _serverPricing = [];
+
+  Future<void> _fetchPricingConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString('vaya_cached_pricing_config');
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = json.decode(raw);
+        if (mounted) {
+          setState(() {
+            _serverPricing = decoded['pricing'] ?? [];
+          });
+        }
+      }
+    } catch (_) {}
+
+    try {
+      var response = await http.get(Uri.parse('$apiBaseUrl/api/pricing-config')).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        response = await http.get(Uri.parse('$apiBaseUrl/api/booking/pricing-config')).timeout(const Duration(seconds: 15));
+      }
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _serverPricing = data['pricing'] ?? [];
+          });
+        }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('vaya_cached_pricing_config', json.encode(data));
+      }
+    } catch (e) {
+      debugPrint('Driver active trip pricing fetch error: $e');
+    }
+  }
+
+  Map<String, dynamic> _getWaitingConfigForVehicle(String? vehicleType) {
+    final targetType = vehicleType ?? widget.driverData['vehicle_type'] ?? 'bike';
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == targetType,
+          orElse: () => null,
+        );
+        if (match != null) {
+          return {
+            'free_pickup': int.tryParse(match['free_wait_minutes_pickup']?.toString() ?? '') ?? 10,
+            'free_dropoff': int.tryParse(match['free_wait_minutes_dropoff']?.toString() ?? '') ?? 10,
+            'rate': double.tryParse(match['wait_charge_per_minute']?.toString() ?? '') ?? 2.0,
+          };
+        }
+      } catch (_) {}
+    }
+    return {'free_pickup': 10, 'free_dropoff': 10, 'rate': 2.0};
+  }
 
   // 6-digit OTP fields
   final List<TextEditingController> _otpControllers = List.generate(6, (_) => TextEditingController());
@@ -3299,6 +3570,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   void initState() {
     super.initState();
     _job = widget.activeJob;
+    _fetchPricingConfig();
     _startPositionTracking();
   }
 
@@ -3436,7 +3708,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
           widget.onJobUpdated(null);
         } else {
           setState(() {
-            _job = data['booking'];
+            _job = Map<String, dynamic>.from(_job)..addAll(Map<String, dynamic>.from(data['booking'] ?? {}));
           });
           widget.onJobUpdated(_job);
         }
@@ -3827,6 +4099,40 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
     );
   }
 
+  void _showActiveJobDetailsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF141412),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('VAYA #${_job['id'].toString().substring(0, 8).toUpperCase()}', style: const TextStyle(fontFamily: 'General Sans', fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 12),
+            Text('Pickup: ${_job['pickup_name']}', style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Color(0xFF9CA3AF))),
+            const SizedBox(height: 6),
+            Text('Drop-off: ${_job['dropoff_name']}', style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Color(0xFF9CA3AF))),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.saffron),
+                child: const Text('Close', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _getStatusDisplayTitle(String status) {
     switch (status) {
       case 'accepted':
@@ -3846,6 +4152,25 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   @override
   Widget build(BuildContext context) {
     final status = _job['status'] ?? 'accepted';
+
+    if (status == 'arrived_dropoff') {
+      return DeliverySummaryScreen(
+        bookingId: _job['id'].toString(),
+        booking: _job,
+        apiBaseUrl: apiBaseUrl,
+        authToken: null,
+        onCompleted: () {
+          widget.onJobUpdated(null);
+        },
+        onViewTripDetails: () {
+          _showActiveJobDetailsSheet();
+        },
+        onReportIssue: () {
+          _openCancelOrReportIssueBottomSheet(context, false);
+        },
+      );
+    }
+
     final isPickupPhase = (status == 'accepted' || status == 'arrived_pickup');
     final isBeforePickupVerification = isPickupPhase;
 
@@ -3859,16 +4184,28 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
     final activePhone = isPickupPhase ? senderPhone : receiverPhone;
 
     final fare = _job['estimated_cost']?.toString() ?? '72.38';
+    final pickupAmountDisplay = _job['pickup_amount']?.toString() ?? fare;
+    final isPickupCash = (_job['cash_collection_point'] == 'PICKUP' || (_job['payment_type'] == 'cash' && _job['cash_collection_point'] != 'DROPOFF'));
+
+    final topChipText = isPickupCash
+        ? 'Cash at pickup · ₹$pickupAmountDisplay'
+        : (_job['payment_type'] == 'cash' ? 'Cash at dropoff · ₹$fare' : 'Paid online · ₹$fare');
 
     final shortBookingId = _job['id'].toString().substring(0, 8).toUpperCase();
 
+    final waitCfg = _getWaitingConfigForVehicle(_job['vehicle_type']);
+    final int freePickupMins = waitCfg['free_pickup'];
+    final double ratePerMin = waitCfg['rate'];
+    final String rateStr = ratePerMin % 1 == 0 ? ratePerMin.toInt().toString() : ratePerMin.toStringAsFixed(1);
+
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Text(
           'VAYA #$shortBookingId',
           style: const TextStyle(
             fontFamily: 'General Sans',
-            fontSize: 28,
+            fontSize: 23,
             fontWeight: FontWeight.w700,
             color: VayaDriverTheme.signalCream,
           ),
@@ -3903,8 +4240,9 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
       ),
       body: Column(
         children: [
-          // Map Section
+          // 1. MAP SECTION (Takes top space)
           Expanded(
+            flex: 3,
             child: GoogleMap(
               initialCameraPosition: CameraPosition(
                 target: LatLng(pickupLat, pickupLng),
@@ -3927,441 +4265,494 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
             ),
           ),
 
-          // Operational Bottom Sheet Container
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFF141412),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-              boxShadow: [
-                BoxShadow(color: Colors.black54, blurRadius: 10, spreadRadius: 2),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Top Drag Handle
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: VayaDriverTheme.slate.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-
-                // Top Header Row (Stage Status Badge + Fare Chip)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // Stage Pill Badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: (isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen).withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen,
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isPickupPhase ? Icons.navigation_outlined : Icons.check_circle_outline,
-                            size: 16,
-                            color: isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _getStatusDisplayTitle(status),
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Fare Compact Chip
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E1B),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Text(
-                        'Fare: ₹$fare',
-                        style: const TextStyle(
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                          color: VayaDriverTheme.signalCream,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 14),
-
-                // DESTINATIONS LIST (Stage-Specific Expanded vs Collapsed Flow)
-                // If in Pickup Phase: Pickup EXPANDED, Drop-off COLLAPSED (56 px route row)
-                // If in Drop-off Phase: Pickup COLLAPSED (56 px route row with Route Green), Drop-off EXPANDED
-
-                if (isPickupPhase) ...[
-                  // EXPANDED PICKUP CARD
-                  _buildExpandedDestinationCard(
-                    title: 'PICKUP LOCATION',
-                    isPickup: true,
-                    locality: _extractLocality(_job['pickup_name']),
-                    shortenedAddress: _cleanAddress(_job['pickup_name']),
-                    contactPhone: senderPhone,
-                    lat: pickupLat,
-                    lng: pickupLng,
-                  ),
-                  const SizedBox(height: 10),
-                  // COLLAPSED DROP-OFF ROUTE ROW (56 px height)
-                  _buildCollapsedRouteRow(
-                    title: 'DROP-OFF LOCATION',
-                    locality: _extractLocality(_job['dropoff_name']),
-                    shortenedAddress: _cleanAddress(_job['dropoff_name']),
-                    isCompleted: false,
-                    iconData: Icons.flag,
-                    iconColor: Colors.redAccent,
-                  ),
-                ] else ...[
-                  // COLLAPSED PICKUP ROUTE ROW (56 px height, Route Green completed stage)
-                  _buildCollapsedRouteRow(
-                    title: 'PICKUP LOCATION',
-                    locality: _extractLocality(_job['pickup_name']),
-                    shortenedAddress: _cleanAddress(_job['pickup_name']),
-                    isCompleted: true,
-                    iconData: Icons.check_circle,
-                    iconColor: VayaDriverTheme.routeGreen,
-                  ),
-                  const SizedBox(height: 10),
-                  // EXPANDED DROP-OFF CARD
-                  _buildExpandedDestinationCard(
-                    title: 'DROP-OFF LOCATION',
-                    isPickup: false,
-                    locality: _extractLocality(_job['dropoff_name']),
-                    shortenedAddress: _cleanAddress(_job['dropoff_name']),
-                    contactPhone: receiverPhone,
-                    lat: dropoffLat,
-                    lng: dropoffLng,
-                  ),
+          // 2. OPERATIONAL BOTTOM SHEET CONTAINER (Scrollable Body + Sticky CTA)
+          Expanded(
+            flex: 5,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF141412),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black54, blurRadius: 10, spreadRadius: 2),
                 ],
-
-                const SizedBox(height: 16),
-
-                // STAGE OPERATIONAL CONTROLS
-                if (status == 'accepted') ...[
-                  // STAGE 1 CTA: "I’ve arrived"
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: VayaDriverTheme.saffron,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        elevation: 2,
+              ),
+              child: Column(
+                children: [
+                  // Top Drag Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 10, bottom: 8),
+                      decoration: BoxDecoration(
+                        color: VayaDriverTheme.slate.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                      onPressed: _isUpdatingStatus
-                          ? null
-                          : () => _handleArrivalWithGeofence(
-                                targetStatus: 'arrived_pickup',
-                                targetLat: pickupLat,
-                                targetLng: pickupLng,
-                                locationName: 'Pickup Location',
-                              ),
-                      child: _isUpdatingStatus
-                          ? const VayaLoader.inline(size: 20, color: Colors.white)
-                          : const Text(
-                              'I’ve arrived',
-                              style: TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
                     ),
                   ),
-                ] else if (status == 'arrived_pickup') ...[
-                  // Waiting time info banner
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1B),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFD97706).withOpacity(0.4)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.timer_outlined, size: 16, color: Color(0xFFD97706)),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Pickup Waiting: 10 mins free, then ₹2/min applies automatically.',
-                            style: TextStyle(fontSize: 12, color: Color(0xFFFBBF24), fontFamily: 'Inter'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // STAGE 2: 6-DIGIT OTP VERIFICATION & PICKUP CASH CHECK
-                  Builder(
-                    builder: (context) {
-                      final isPickupCash = (_job['cash_collection_point'] == 'PICKUP' || (_job['payment_type'] == 'cash' && _job['cash_collection_point'] != 'DROPOFF'));
-                      return Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E1E1B),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (isPickupCash) ...[
+
+                  // SCROLLABLE SHEET CONTENT AREA
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Top Header Row (Stage Status Badge + Unified Payment Top Chip)
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              // Stage Pill Badge
                               Container(
-                                padding: const EdgeInsets.all(12),
-                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: VayaDriverTheme.saffron.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: VayaDriverTheme.saffron),
+                                  color: (isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen).withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen,
+                                    width: 1,
+                                  ),
                                 ),
                                 child: Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.payments, color: VayaDriverTheme.saffron, size: 22),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'Collect Cash at Pickup',
-                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaDriverTheme.saffron, fontFamily: 'Inter'),
-                                          ),
-                                          Text(
-                                            'Collect ₹$fare from Sender before starting trip',
-                                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
-                                          ),
-                                        ],
+                                    Icon(
+                                      isPickupPhase ? Icons.navigation_outlined : Icons.check_circle_outline,
+                                      size: 16,
+                                      color: isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _getStatusDisplayTitle(status),
+                                      style: TextStyle(
+                                        fontFamily: 'Inter',
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                        color: isPickupPhase ? VayaDriverTheme.saffron : VayaDriverTheme.routeGreen,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              CheckboxListTile(
-                                contentPadding: EdgeInsets.zero,
-                                activeColor: VayaDriverTheme.saffron,
-                                value: _isPickupCashCollectedConfirmed,
-                                onChanged: (val) {
-                                  setState(() => _isPickupCashCollectedConfirmed = val ?? false);
-                                },
-                                title: Text(
-                                  'I confirm that I have collected ₹$fare in cash from the sender.',
-                                  style: const TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream, fontFamily: 'Inter'),
+
+                              // Unified Top Chip (No Duplicate Fare)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E1E1B),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: VayaDriverTheme.saffron.withValues(alpha: 0.4)),
+                                ),
+                                child: Text(
+                                  topChipText,
+                                  style: const TextStyle(
+                                    fontFamily: 'Inter',
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                    color: VayaDriverTheme.signalCream,
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 12),
                             ],
+                          ),
 
-                            const Text(
-                              'Enter 6-Digit Pickup OTP',
-                              style: TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.w600, color: VayaDriverTheme.signalCream),
+                          const SizedBox(height: 12),
+
+                          // DESTINATIONS LIST (Stage-Specific Expanded vs Collapsed Flow)
+                          if (isPickupPhase) ...[
+                            // EXPANDED PICKUP CARD (Focused on address, masked contact, Call & Navigate)
+                            _buildExpandedDestinationCard(
+                              title: 'PICKUP LOCATION',
+                              isPickup: true,
+                              locality: _extractLocality(_job['pickup_name']),
+                              shortenedAddress: _cleanAddress(_job['pickup_name']),
+                              contactPhone: senderPhone,
+                              lat: pickupLat,
+                              lng: pickupLng,
                             ),
                             const SizedBox(height: 10),
+                            // COLLAPSED DROP-OFF ROUTE ROW (56 px height)
+                            _buildCollapsedRouteRow(
+                              title: 'DROP-OFF LOCATION',
+                              locality: _extractLocality(_job['dropoff_name']),
+                              shortenedAddress: _cleanAddress(_job['dropoff_name']),
+                              isCompleted: false,
+                              iconData: Icons.flag,
+                              iconColor: Colors.redAccent,
+                            ),
+                          ] else ...[
+                            // COLLAPSED PICKUP ROUTE ROW (56 px height, Route Green completed stage)
+                            _buildCollapsedRouteRow(
+                              title: 'PICKUP LOCATION',
+                              locality: _extractLocality(_job['pickup_name']),
+                              shortenedAddress: _cleanAddress(_job['pickup_name']),
+                              isCompleted: true,
+                              iconData: Icons.check_circle,
+                              iconColor: VayaDriverTheme.routeGreen,
+                            ),
+                            const SizedBox(height: 10),
+                            // EXPANDED DROP-OFF CARD
+                            _buildExpandedDestinationCard(
+                              title: 'DROP-OFF LOCATION',
+                              isPickup: false,
+                              locality: _extractLocality(_job['dropoff_name']),
+                              shortenedAddress: _cleanAddress(_job['dropoff_name']),
+                              contactPhone: receiverPhone,
+                              lat: dropoffLat,
+                              lng: dropoffLng,
+                            ),
+                          ],
 
-                            // 6 SEPARATE ACCESSIBLE DIGIT BOXES
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: List.generate(6, (index) {
-                                return SizedBox(
-                                  width: 44,
-                                  height: 50,
-                                  child: Semantics(
-                                    label: 'OTP Digit ${index + 1} of 6',
-                                    child: TextField(
-                                      controller: _otpControllers[index],
-                                      focusNode: _otpFocusNodes[index],
-                                      keyboardType: TextInputType.number,
-                                      textAlign: TextAlign.center,
-                                      maxLength: 1,
-                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
-                                      decoration: InputDecoration(
-                                        counterText: '',
-                                        contentPadding: EdgeInsets.zero,
-                                        filled: true,
-                                        fillColor: const Color(0xFF2C2C28),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: BorderSide(
-                                            color: _otpError != null ? Colors.redAccent : Colors.white24,
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: VayaDriverTheme.saffron, width: 2),
-                                        ),
-                                      ),
-                                      onChanged: (val) {
-                                        if (val.isNotEmpty) {
-                                          if (index < 5) {
-                                            _otpFocusNodes[index + 1].requestFocus();
-                                          } else {
-                                            _otpFocusNodes[index].unfocus();
-                                          }
-                                        } else {
-                                          if (index > 0) {
-                                            _otpFocusNodes[index - 1].requestFocus();
-                                          }
-                                        }
-                                      },
+                          const SizedBox(height: 12),
+
+                          // STAGE OPERATIONAL CONTROLS IN SCROLLABLE BODY
+                          if (status == 'arrived_pickup') ...[
+                            // Shortened Waiting Notice Banner
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E1E1B),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFD97706).withValues(alpha: 0.4)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.timer_outlined, size: 16, color: Color(0xFFD97706)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      '$freePickupMins min free · then ₹$rateStr/min',
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFFFBBF24), fontFamily: 'Inter', fontWeight: FontWeight.w500),
                                     ),
                                   ),
-                                );
-                              }),
+                                ],
+                              ),
                             ),
 
-                            if (_otpError != null) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                _otpError!,
-                                style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.redAccent.shade100, fontWeight: FontWeight.w500),
+                            // SIMPLIFIED PAYMENT CHECKBOX ROW & 6-DIGIT OTP FIELDS
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E1E1B),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.white12),
                               ),
-                            ],
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (isPickupCash) ...[
+                                    CheckboxListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      activeColor: VayaDriverTheme.saffron,
+                                      controlAffinity: ListTileControlAffinity.leading,
+                                      value: _isPickupCashCollectedConfirmed,
+                                      onChanged: (val) {
+                                        setState(() => _isPickupCashCollectedConfirmed = val ?? false);
+                                      },
+                                      title: Text(
+                                        '₹$pickupAmountDisplay cash collected from sender',
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: VayaDriverTheme.signalCream, fontFamily: 'Inter'),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
 
-                            const SizedBox(height: 12),
+                                  const Text(
+                                    'Enter 6-Digit Pickup OTP',
+                                    style: TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.w600, color: VayaDriverTheme.signalCream),
+                                  ),
+                                  const SizedBox(height: 10),
 
-                            // INK BLACK VERIFY BUTTON
+                                  // 6 SEPARATE ACCESSIBLE DIGIT BOXES
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: List.generate(6, (index) {
+                                      return SizedBox(
+                                        width: 44,
+                                        height: 50,
+                                        child: Semantics(
+                                          label: 'OTP Digit ${index + 1} of 6',
+                                          child: TextField(
+                                            controller: _otpControllers[index],
+                                            focusNode: _otpFocusNodes[index],
+                                            keyboardType: TextInputType.number,
+                                            textAlign: TextAlign.center,
+                                            maxLength: 1,
+                                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
+                                            decoration: InputDecoration(
+                                              counterText: '',
+                                              contentPadding: EdgeInsets.zero,
+                                              filled: true,
+                                              fillColor: const Color(0xFF2C2C28),
+                                              border: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(12),
+                                                borderSide: BorderSide(
+                                                  color: _otpError != null ? Colors.redAccent : Colors.white24,
+                                                ),
+                                              ),
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(12),
+                                                borderSide: const BorderSide(color: VayaDriverTheme.saffron, width: 2),
+                                              ),
+                                            ),
+                                            onChanged: (val) {
+                                              setState(() {}); // Rebuild to evaluate sticky CTA
+                                              if (val.isNotEmpty) {
+                                                if (index < 5) {
+                                                  _otpFocusNodes[index + 1].requestFocus();
+                                                } else {
+                                                  _otpFocusNodes[index].unfocus();
+                                                }
+                                              } else {
+                                                if (index > 0) {
+                                                  _otpFocusNodes[index - 1].requestFocus();
+                                                }
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  ),
+
+                                  if (_otpError != null) ...[
+                                    const SizedBox(height: 10),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: (_isOtpExpired ? Colors.orangeAccent : Colors.redAccent).withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: (_isOtpExpired ? Colors.orangeAccent : Colors.redAccent).withValues(alpha: 0.4)),
+                                      ),
+                                      child: Text(
+                                        _otpError!,
+                                        style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: _isOtpExpired ? Colors.orange.shade100 : Colors.redAccent.shade100, fontWeight: FontWeight.w500),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ] else if (status == 'dropping_off' || status == 'in_transit' || status == 'arrived_dropoff') ...[
+                            // POST-PICKUP RECEIPT & DROP-OFF WAITING RESPONSIBILITY CARD
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E1E1B),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: VayaDriverTheme.routeGreen.withValues(alpha: 0.4)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.receipt_long, color: VayaDriverTheme.routeGreen, size: 20),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Pickup Receipt',
+                                        style: TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen),
+                                      ),
+                                      const Spacer(),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: VayaDriverTheme.routeGreen.withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Text(
+                                          'Collected',
+                                          style: TextStyle(fontFamily: 'Inter', fontSize: 11, fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    isPickupCash
+                                        ? 'Pickup amount: ₹$pickupAmountDisplay collected in cash from sender.'
+                                        : 'Pickup amount: ₹$pickupAmountDisplay (Paid online).',
+                                    style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Divider(color: Colors.white12, height: 12),
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Icon(Icons.info_outline, color: Color(0xFF9CA3AF), size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          'Drop-off waiting charges ($freePickupMins min free · then ₹$rateStr/min) will be paid by receiver at drop-off location if waiting exceeds $freePickupMins mins.',
+                                          style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: Color(0xFF9CA3AF), height: 1.3),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 3. PERSISTENT STICKY BOTTOM ACTION BAR (Pinned above Android Safe Area)
+                  SafeArea(
+                    top: false,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF141412),
+                        border: Border(top: BorderSide(color: Colors.white12)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (status == 'accepted') ...[
+                            // STAGE 1 CTA: "I’ve arrived"
                             SizedBox(
-                              height: 50,
+                              height: 52,
                               child: ElevatedButton(
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF141414),
+                                  backgroundColor: VayaDriverTheme.saffron,
                                   foregroundColor: Colors.white,
-                                  side: BorderSide(color: _isOtpExpired ? Colors.redAccent : VayaDriverTheme.saffron.withValues(alpha: 0.8), width: 1.5),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                                   elevation: 2,
                                 ),
-                                onPressed: (_isVerifyingOtp || (isPickupCash && !_isPickupCashCollectedConfirmed)) ? null : _verify6DigitOtp,
-                                child: _isVerifyingOtp
+                                onPressed: _isUpdatingStatus
+                                    ? null
+                                    : () => _handleArrivalWithGeofence(
+                                          targetStatus: 'arrived_pickup',
+                                          targetLat: pickupLat,
+                                          targetLng: pickupLng,
+                                          locationName: 'Pickup Location',
+                                        ),
+                                child: _isUpdatingStatus
+                                    ? const VayaLoader.inline(size: 20, color: Colors.white)
+                                    : const Text(
+                                        'I’ve arrived',
+                                        style: TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold),
+                                      ),
+                              ),
+                            ),
+                          ] else if (status == 'arrived_pickup') ...[
+                            // STAGE 2 STICKY CTA: "Verify OTP & start delivery"
+                            Builder(
+                              builder: (context) {
+                                final isOtpComplete = _otpControllers.every((c) => c.text.trim().isNotEmpty);
+                                final isCtaEnabled = isOtpComplete && (!isPickupCash || _isPickupCashCollectedConfirmed) && !_isVerifyingOtp;
+                                return SizedBox(
+                                  height: 52,
+                                  child: ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isCtaEnabled ? VayaDriverTheme.saffron : const Color(0xFF2C2C28),
+                                      foregroundColor: isCtaEnabled ? Colors.white : Colors.white38,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      elevation: isCtaEnabled ? 2 : 0,
+                                    ),
+                                    onPressed: isCtaEnabled ? _verify6DigitOtp : null,
+                                    child: _isVerifyingOtp
+                                        ? const VayaLoader.inline(size: 20, color: Colors.white)
+                                        : Text(
+                                            !isOtpComplete
+                                                ? 'Enter 6-digit OTP'
+                                                : (isPickupCash && !_isPickupCashCollectedConfirmed)
+                                                    ? 'Confirm cash collection'
+                                                    : 'Verify OTP & start delivery',
+                                            style: TextStyle(
+                                              fontFamily: 'Inter',
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: isCtaEnabled ? Colors.white : Colors.white38,
+                                            ),
+                                          ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ] else if (status == 'dropping_off' || status == 'in_transit') ...[
+                            // STAGE 3 CTA: "I’ve arrived at drop-off"
+                            SizedBox(
+                              height: 52,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: VayaDriverTheme.saffron,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  elevation: 2,
+                                ),
+                                onPressed: _isUpdatingStatus
+                                    ? null
+                                    : () => _handleArrivalWithGeofence(
+                                          targetStatus: 'arrived_dropoff',
+                                          targetLat: dropoffLat,
+                                          targetLng: dropoffLng,
+                                          locationName: 'Drop-off Location',
+                                        ),
+                                child: _isUpdatingStatus
+                                    ? const VayaLoader.inline(size: 20, color: Colors.white)
+                                    : const Text(
+                                        'I’ve arrived at drop-off',
+                                        style: TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold),
+                                      ),
+                              ),
+                            ),
+                          ] else if (status == 'arrived_dropoff') ...[
+                            // STAGE 4 CTA: Complete Delivery
+                            SizedBox(
+                              height: 52,
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: VayaDriverTheme.routeGreen,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  elevation: 2,
+                                ),
+                                onPressed: _isUpdatingStatus ? null : _handleCompleteDeliveryWithCashCheck,
+                                icon: const Icon(Icons.payments, size: 20),
+                                label: _isUpdatingStatus
                                     ? const VayaLoader.inline(size: 20, color: Colors.white)
                                     : Text(
-                                        (isPickupCash && !_isPickupCashCollectedConfirmed)
-                                            ? 'Confirm cash collection first'
-                                            : 'Verify OTP & start delivery',
-                                        style: const TextStyle(fontFamily: 'Inter', fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                                        'Collected ₹$fare',
+                                        style: const TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold),
                                       ),
                               ),
                             ),
                           ],
-                        ),
-                      );
-                    },
-                  ),
-                ] else if (status == 'dropping_off' || status == 'in_transit') ...[
-                  // STAGE 3 CTA: "I’ve arrived" (at drop-off)
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: VayaDriverTheme.saffron,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        elevation: 2,
-                      ),
-                      onPressed: _isUpdatingStatus
-                          ? null
-                          : () => _handleArrivalWithGeofence(
-                                targetStatus: 'arrived_dropoff',
-                                targetLat: dropoffLat,
-                                targetLng: dropoffLng,
-                                locationName: 'Drop-off Location',
+
+                          const SizedBox(height: 4),
+
+                          // PERSISTENT LOW-EMPHASIS ACTION
+                          Center(
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                      child: _isUpdatingStatus
-                          ? const VayaLoader.inline(size: 20, color: Colors.white)
-                          : const Text(
-                              'I’ve arrived at drop-off',
-                              style: TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold),
+                              onPressed: () => _openCancelOrReportIssueBottomSheet(context, isBeforePickupVerification),
+                              child: Text(
+                                isBeforePickupVerification ? 'Cancel delivery' : 'Report an issue',
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: isBeforePickupVerification ? Colors.redAccent.shade100 : const Color(0xFF9CA3AF),
+                                ),
+                              ),
                             ),
-                    ),
-                  ),
-                ] else if (status == 'arrived_dropoff') ...[
-                  // Waiting time info banner
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1B),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFD97706).withOpacity(0.4)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.timer_outlined, size: 16, color: Color(0xFFD97706)),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Drop-off Waiting: 10 mins free, then ₹2/min applies automatically.',
-                            style: TextStyle(fontSize: 12, color: Color(0xFFFBBF24), fontFamily: 'Inter'),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // STAGE 4 CTA: "Collected ₹72.38" (Explicit Cash Confirmation requirement)
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: VayaDriverTheme.routeGreen,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        elevation: 2,
+                        ],
                       ),
-                      onPressed: _isUpdatingStatus ? null : _handleCompleteDeliveryWithCashCheck,
-                      icon: const Icon(Icons.payments, size: 20),
-                      label: _isUpdatingStatus
-                          ? const VayaLoader.inline(size: 20, color: Colors.white)
-                          : Text(
-                              'Collected ₹$fare',
-                              style: const TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
                     ),
                   ),
                 ],
-
-                const SizedBox(height: 8),
-
-                // PERSISTENT LOW-EMPHASIS ACTION (Cancel delivery before pickup verification / Report an issue after)
-                Center(
-                  child: TextButton(
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    onPressed: () => _openCancelOrReportIssueBottomSheet(context, isBeforePickupVerification),
-                    child: Text(
-                      isBeforePickupVerification ? 'Cancel delivery' : 'Report an issue',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: isBeforePickupVerification ? Colors.redAccent.shade100 : const Color(0xFF9CA3AF),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -5286,8 +5677,6 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
   void _showTripDetailsSheet(Map<String, dynamic> item, {required bool isCompleted}) {
     final vayaId = _formatVayaId(item['id']);
     final cost = double.tryParse(item['estimated_cost']?.toString() ?? '0') ?? 0.0;
-    final platformFee = (cost * 0.10);
-    final netEarnings = cost - platformFee;
 
     final vehicle = (item['vehicle_type']?.toString() ?? 'bike').toUpperCase();
     final pickup = item['pickup_name']?.toString() ?? 'Pickup Location';
@@ -5295,7 +5684,6 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
     final dateStr = _formatDate(item['created_at']?.toString());
     final senderName = item['sender_name']?.toString() ?? 'Customer';
     final senderPhone = item['sender_phone']?.toString() ?? widget.driverData['phone'] ?? '';
-    final paymentMethod = (item['payment_type'] ?? item['payment_method'] ?? 'cash').toString().toUpperCase();
 
     showModalBottomSheet(
       context: context,
@@ -5491,9 +5879,9 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
                   ),
                   const SizedBox(height: 24),
 
-                  // Fare & Earnings Breakdown
+                  // Fare & Payment Breakdown (Trip history → Delivery details → Fare and payment)
                   const Text(
-                    'FARE & EARNINGS BREAKDOWN',
+                    'FARE AND PAYMENT DETAILS',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFA09D95), letterSpacing: 0.8),
                   ),
                   const SizedBox(height: 12),
@@ -5509,16 +5897,30 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Gross Order Fare', style: TextStyle(color: Color(0xFFA09D95))),
-                            Text('₹${cost.toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.w600)),
+                            const Text('Base delivery fare', style: TextStyle(color: Color(0xFFA09D95))),
+                            Text('₹${(double.tryParse(item['estimated_cost']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.w600)),
                           ],
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('VAYA Platform Fee (10%)', style: TextStyle(color: Color(0xFFA09D95))),
-                            Text('-₹${platformFee.toStringAsFixed(2)}', style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                            Text(
+                              'Pickup waiting (${item['pickup_wait_minutes'] ?? 0} min)',
+                              style: const TextStyle(color: Color(0xFFA09D95)),
+                            ),
+                            Text('₹${(double.tryParse(item['waiting_charge_pickup']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.signalCream)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Drop-off waiting (${item['dropoff_wait_minutes'] ?? 0} min)',
+                              style: const TextStyle(color: Color(0xFFA09D95)),
+                            ),
+                            Text('₹${(double.tryParse(item['waiting_charge_dropoff']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.signalCream)),
                           ],
                         ),
                         const Padding(
@@ -5528,22 +5930,69 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Net Driver Earnings', style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text('₹${netEarnings.toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.saffron, fontWeight: FontWeight.bold, fontSize: 18)),
+                            const Text('VAYA fare total', style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontSize: 15)),
+                            Text('₹${(double.tryParse(item['final_cost']?.toString() ?? item['estimated_cost']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.saffron, fontWeight: FontWeight.bold, fontSize: 16)),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Amount collected at pickup', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12)),
+                            Text('₹${(double.tryParse(item['amount_collected_at_pickup']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Amount collected at drop-off', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12)),
+                            Text('₹${(double.tryParse(item['amount_due_now']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Online amount paid', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12)),
+                            Text('₹${(double.tryParse(item['amount_paid_online']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Customer total', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12, fontWeight: FontWeight.bold)),
+                            Text('₹${(double.tryParse(item['final_cost']?.toString() ?? item['estimated_cost']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8.0),
+                          child: Divider(color: VayaDriverTheme.slate, height: 1),
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Platform Commission (10%)', style: TextStyle(color: Color(0xFFA09D95))),
+                            Text('-₹${(double.tryParse(item['commission_amount']?.toString() ?? (cost * 0.10).toString()) ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Your delivery earning', style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontSize: 15)),
+                            Text('₹${(double.tryParse(item['driver_net_earnings']?.toString() ?? (cost * 0.90).toString()) ?? 0).toStringAsFixed(2)}', style: const TextStyle(color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 17)),
                           ],
                         ),
                         const SizedBox(height: 12),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Payment Mode', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12)),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: VayaDriverTheme.slate.withValues(alpha: 0.5),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(paymentMethod, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream)),
+                            const Text('Payment Status', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12)),
+                            Text(
+                              isCompleted ? 'Completed' : 'Cancelled',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isCompleted ? VayaDriverTheme.routeGreen : Colors.redAccent),
                             ),
                           ],
                         ),
@@ -5551,10 +6000,10 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Payout Status', style: TextStyle(color: Color(0xFFA09D95), fontSize: 12)),
+                            const Text('Settlement Ref', style: TextStyle(color: Color(0xFFA09D95), fontSize: 11)),
                             Text(
-                              isCompleted ? 'Settled to Partner Wallet' : 'No Payout (Cancelled)',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isCompleted ? VayaDriverTheme.routeGreen : Colors.redAccent),
+                              item['settlement_id']?.toString() ?? 'SETTLE-${vayaId.replaceAll("#", "")}',
+                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF9CA3AF)),
                             ),
                           ],
                         ),
@@ -6078,14 +6527,14 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
 
   // Payout Details State & Saved Masked Data
   String _selectedPayoutTab = 'upi'; // 'upi' or 'bank'
-  String _savedUpiId = '9876543210@paytm';
-  String _savedAccountNo = '501004392815678';
-  String _savedIfsc = 'SBIN0001234';
-  String _savedAccountName = 'Gourav Mahunta';
-  bool _hasSavedPayoutDetails = true;
+  String _savedUpiId = '';
+  String _savedAccountNo = '';
+  String _savedIfsc = '';
+  String _savedAccountName = '';
+  bool _hasSavedPayoutDetails = false;
   bool _isPayoutEditingUnlocked = false;
-  String _payoutVerificationStatus = 'verified'; // 'none', 'pending', 'verified', 'rejected', 'failed'
-  String _payoutRejectionReason = 'Name mismatch on Bank Record';
+  String _payoutVerificationStatus = 'none'; // 'none', 'pending', 'verified', 'rejected', 'failed'
+  String _payoutRejectionReason = '';
 
   @override
   void initState() {
@@ -6093,6 +6542,38 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
     _initRazorpay();
     _loadCachedLedgerFirst();
     _fetchLedgerData();
+    _fetchBankDetails();
+  }
+
+  Future<void> _fetchBankDetails() async {
+    try {
+      final token = await DriverAuthHelper.getAuthToken();
+      if (token == null) return;
+      final res = await http.get(
+        Uri.parse('$apiBaseUrl/api/driver/bank-details'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['success'] == true && data['bankDetails'] != null) {
+          final bd = data['bankDetails'];
+          if (mounted) {
+            setState(() {
+              _savedUpiId = bd['upiId'] ?? bd['upi_id'] ?? '';
+              _savedAccountNo = bd['bankAccountNo'] ?? bd['bank_account_no'] ?? '';
+              _savedIfsc = bd['bankIfsc'] ?? bd['bank_ifsc'] ?? '';
+              _savedAccountName = bd['bankAccountName'] ?? bd['bank_account_name'] ?? '';
+              _hasSavedPayoutDetails = _savedUpiId.isNotEmpty || _savedAccountNo.isNotEmpty;
+              if (_hasSavedPayoutDetails) {
+                _payoutVerificationStatus = 'verified';
+              }
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Failed to fetch bank details: $e");
+    }
   }
 
   void _initRazorpay() {
@@ -6171,11 +6652,11 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
       final summary = cached['summary'] ?? {};
       setState(() {
         _walletBalance = double.tryParse(summary['walletBalance']?.toString() ?? '0') ?? 0.0;
-        _outstandingDues = double.tryParse(summary['outstandingDues']?.toString() ?? '142.73') ?? 142.73;
+        _outstandingDues = double.tryParse(summary['outstandingDues']?.toString() ?? '0') ?? 0.0;
         _maxLimit = double.tryParse(summary['maxNegativeLimit']?.toString() ?? '500') ?? 500.0;
         _accountStatus = summary['accountStatus'] ?? 'active';
         _dueDueDate = summary['duesDueDate'];
-        _ledgerEntries = cached['entries'] ?? _getMockInitialEntries();
+        _ledgerEntries = cached['entries'] ?? [];
         _isLoading = false;
       });
     }
@@ -6204,11 +6685,11 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
           final fetchedEntries = data['entries'] ?? [];
           setState(() {
             _walletBalance = double.tryParse(summary['walletBalance']?.toString() ?? '0') ?? 0.0;
-            _outstandingDues = double.tryParse(summary['outstandingDues']?.toString() ?? '142.73') ?? 142.73;
+            _outstandingDues = double.tryParse(summary['outstandingDues']?.toString() ?? '0') ?? 0.0;
             _maxLimit = double.tryParse(summary['maxNegativeLimit']?.toString() ?? '500') ?? 500.0;
             _accountStatus = summary['accountStatus'] ?? 'active';
             _dueDueDate = summary['duesDueDate'];
-            _ledgerEntries = fetchedEntries.isNotEmpty ? fetchedEntries : _getMockInitialEntries();
+            _ledgerEntries = fetchedEntries;
             _isLoading = false;
             _isRefreshing = false;
             _isOffline = false;
@@ -6228,7 +6709,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
           _isRefreshing = false;
           _isOffline = true;
           if (_ledgerEntries.isEmpty) {
-            _ledgerEntries = _getMockInitialEntries();
+            _ledgerEntries = [];
           }
         });
       }
@@ -6237,61 +6718,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
 
   // Fallback initial demo entries matching requirements if backend is empty
   List<dynamic> _getMockInitialEntries() {
-    return [
-      {
-        'id': 101,
-        'entry_type': 'platform_commission',
-        'amount': -9.17,
-        'balance_after': -142.73,
-        'description': 'Platform fee · VAYA #CF9DCA',
-        'order_id': 'CF9DCA',
-        'cash_fare': 91.69,
-        'created_at': '2026-07-28T18:27:00Z',
-        'is_disputed': false
-      },
-      {
-        'id': 102,
-        'entry_type': 'platform_commission',
-        'amount': -9.17,
-        'balance_after': -133.56,
-        'description': 'Platform fee · VAYA #B82E11',
-        'order_id': 'B82E11',
-        'cash_fare': 91.69,
-        'created_at': '2026-07-28T01:36:00Z',
-        'is_disputed': false
-      },
-      {
-        'id': 103,
-        'entry_type': 'platform_commission',
-        'amount': -9.17,
-        'balance_after': -124.39,
-        'description': 'Platform fee · VAYA #A419FF',
-        'order_id': 'A419FF',
-        'cash_fare': 91.69,
-        'created_at': '2026-07-28T00:49:00Z',
-        'is_disputed': false
-      },
-      {
-        'id': 104,
-        'entry_type': 'platform_commission',
-        'amount': -13.31,
-        'balance_after': -115.22,
-        'description': 'Platform fee · VAYA #E9021A',
-        'order_id': 'E9021A',
-        'cash_fare': 133.10,
-        'created_at': '2026-07-27T22:15:00Z',
-        'is_disputed': false
-      },
-      {
-        'id': 105,
-        'entry_type': 'direct_repayment',
-        'amount': 200.00,
-        'balance_after': -101.91,
-        'description': 'UPI Dues Top-up (Ref: UPI-98321)',
-        'created_at': '2026-07-26T14:10:00Z',
-        'is_disputed': false
-      },
-    ];
+    return [];
   }
 
   // Detect installed UPI apps dynamically without promotional tags
@@ -8449,23 +8876,23 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
   void initState() {
     super.initState();
     _profileData = Map<String, dynamic>.from(widget.driverData);
-    if (_profileData['name'] == null || _profileData['name'].toString().isEmpty) {
-      _profileData['name'] = 'Gourav';
+    if (_profileData['name'] == null) {
+      _profileData['name'] = '';
     }
     if (_profileData['partner_id'] == null) {
-      _profileData['partner_id'] = '#VY-8842';
+      _profileData['partner_id'] = '';
     }
-    if (_profileData['vehicle_reg'] == null || _profileData['vehicle_reg'].toString().isEmpty) {
-      _profileData['vehicle_reg'] = 'OD-02-AX-9999';
+    if (_profileData['vehicle_reg'] == null) {
+      _profileData['vehicle_reg'] = '';
     }
-    if (_profileData['vehicle_type'] == null || _profileData['vehicle_type'].toString().isEmpty) {
-      _profileData['vehicle_type'] = 'bike';
+    if (_profileData['vehicle_type'] == null) {
+      _profileData['vehicle_type'] = '';
     }
     if (_profileData['weight_capacity'] == null) {
-      _profileData['weight_capacity'] = 20;
+      _profileData['weight_capacity'] = 0;
     }
-    if (_profileData['phone'] == null || _profileData['phone'].toString().isEmpty) {
-      _profileData['phone'] = '+919876543210';
+    if (_profileData['phone'] == null) {
+      _profileData['phone'] = '';
     }
   }
 
@@ -8495,14 +8922,122 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
     return '2-Wheeler (Bike)';
   }
 
+  Future<void> _saveDriverProfileToDb(Map<String, dynamic> body) async {
+    try {
+      final token = await DriverAuthHelper.getAuthToken();
+      if (token != null) {
+        final res = await http.post(
+          Uri.parse('$apiBaseUrl/api/driver/status'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: json.encode(body),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          if (data['success'] == true && data['driver'] != null) {
+            final d = data['driver'];
+            if (mounted) {
+              setState(() {
+                _profileData = Map<String, dynamic>.from(d);
+              });
+            }
+            await DriverStorage.saveCachedProfile(d);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error updating driver profile DB: $e');
+    }
+  }
+
+  Future<void> _sendDriverSupportTicket(String type, Map<String, dynamic> details) async {
+    try {
+      final token = await DriverAuthHelper.getAuthToken();
+      if (token != null) {
+        await http.post(
+          Uri.parse('$apiBaseUrl/api/driver/support-ticket'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: json.encode({'type': type, 'details': details}),
+        ).timeout(const Duration(seconds: 8));
+      }
+    } catch (e) {
+      debugPrint('Error creating driver support ticket: $e');
+    }
+  }
+
   Future<void> _refreshProfile() async {
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        _isError = false;
-      });
+    if (mounted) setState(() => _isLoading = true);
+    try {
+      final token = await DriverAuthHelper.getAuthToken();
+      if (token != null) {
+        final res = await http.get(
+          Uri.parse('$apiBaseUrl/api/driver/me'),
+          headers: {'Authorization': 'Bearer $token'},
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          if (data['exists'] == true && data['driver'] != null) {
+            final d = Map<String, dynamic>.from(data['driver']);
+
+            // Fetch payout bank & UPI details
+            try {
+              final bankRes = await http.get(
+                Uri.parse('$apiBaseUrl/api/driver/bank-details'),
+                headers: {'Authorization': 'Bearer $token'},
+              ).timeout(const Duration(seconds: 5));
+              if (bankRes.statusCode == 200) {
+                final bankData = json.decode(bankRes.body);
+                if (bankData['success'] == true && bankData['bankDetails'] != null) {
+                  final bd = bankData['bankDetails'];
+                  if ((bd['upiId'] ?? '').toString().isNotEmpty) d['upi_id'] = bd['upiId'];
+                  if ((bd['bankAccountNo'] ?? '').toString().isNotEmpty) d['account_no'] = bd['bankAccountNo'];
+                  if ((bd['bankIfsc'] ?? '').toString().isNotEmpty) d['ifsc'] = bd['bankIfsc'];
+                  if ((bd['bankAccountName'] ?? '').toString().isNotEmpty) d['bank_account_name'] = bd['bankAccountName'];
+                }
+              }
+            } catch (_) {}
+
+            if (mounted) {
+              setState(() {
+                _profileData = d;
+                _isLoading = false;
+                _isError = false;
+              });
+            }
+            await DriverStorage.saveCachedProfile(d);
+            return;
+          }
+        }
+      }
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && mounted) {
+        setState(() {
+          if ((_profileData['name'] ?? '').toString().isEmpty && user.displayName != null) {
+            _profileData['name'] = user.displayName;
+          }
+          if ((_profileData['phone'] ?? '').toString().isEmpty && user.phoneNumber != null) {
+            _profileData['phone'] = user.phoneNumber;
+          }
+          if ((_profileData['email'] ?? '').toString().isEmpty && user.email != null) {
+            _profileData['email'] = user.email;
+          }
+          _isLoading = false;
+          _isError = false;
+        });
+      } else if (mounted) {
+        setState(() { _isLoading = false; });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -8534,11 +9069,11 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
 
   // Row Outcome 1: Edit Profile Form with OTP verification
   void _openEditProfileSheet(BuildContext context) {
-    final nameController = TextEditingController(text: _profileData['name'] ?? 'Gourav');
+    final nameController = TextEditingController(text: _profileData['name'] ?? '');
     final phoneController = TextEditingController(
-      text: (_profileData['phone'] ?? '+919876543210').replaceAll('+91', '').trim(),
+      text: (_profileData['phone'] ?? '').replaceAll('+91', '').trim(),
     );
-    final emailController = TextEditingController(text: _profileData['email'] ?? 'gourav.partner@vaya.in');
+    final emailController = TextEditingController(text: _profileData['email'] ?? '');
     
     bool isVerifyingOtp = false;
     bool isSaving = false;
@@ -8556,9 +9091,9 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
-            final initialName = _profileData['name'] ?? 'Gourav';
-            final initialPhone = (_profileData['phone'] ?? '+919876543210').replaceAll('+91', '').trim();
-            final initialEmail = _profileData['email'] ?? 'gourav.partner@vaya.in';
+            final initialName = _profileData['name'] ?? '';
+            final initialPhone = (_profileData['phone'] ?? '').replaceAll('+91', '').trim();
+            final initialEmail = _profileData['email'] ?? '';
 
             bool hasChanges = nameController.text.trim() != initialName ||
                 phoneController.text.trim() != initialPhone ||
@@ -8688,14 +9223,20 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                                 setSheetState(() => isVerifyingOtp = true);
                               } else {
                                 setSheetState(() => isSaving = true);
-                                await Future.delayed(const Duration(milliseconds: 500));
+                                final newName = nameController.text.trim();
+                                final newEmail = emailController.text.trim();
+                                await _saveDriverProfileToDb({
+                                  'name': newName,
+                                  'email': newEmail,
+                                  'phone': _profileData['phone'],
+                                });
                                 if (sheetContext.mounted) {
                                   setState(() {
-                                    _profileData['name'] = nameController.text.trim();
-                                    _profileData['email'] = emailController.text.trim();
+                                    _profileData['name'] = newName;
+                                    _profileData['email'] = newEmail;
                                   });
                                   Navigator.pop(sheetContext);
-                                  _showSuccessConfirmation('Profile details updated successfully!');
+                                  _showSuccessConfirmation('Profile details updated successfully in database!');
                                 }
                               }
                             },
@@ -8774,15 +9315,22 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                                 return;
                               }
                               setSheetState(() => isSaving = true);
-                              await Future.delayed(const Duration(milliseconds: 600));
+                              final newName = nameController.text.trim();
+                              final newPhone = '+91${phoneController.text.trim()}';
+                              final newEmail = emailController.text.trim();
+                              await _saveDriverProfileToDb({
+                                'name': newName,
+                                'phone': newPhone,
+                                'email': newEmail,
+                              });
                               if (sheetContext.mounted) {
                                 setState(() {
-                                  _profileData['name'] = nameController.text.trim();
-                                  _profileData['phone'] = '+91${phoneController.text.trim()}';
-                                  _profileData['email'] = emailController.text.trim();
+                                  _profileData['name'] = newName;
+                                  _profileData['phone'] = newPhone;
+                                  _profileData['email'] = newEmail;
                                 });
                                 Navigator.pop(sheetContext);
-                                _showSuccessConfirmation('Mobile number & profile updated successfully!');
+                                _showSuccessConfirmation('Mobile number & profile updated and saved to database!');
                               }
                             },
                       style: ElevatedButton.styleFrom(
@@ -8884,7 +9432,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _profileData['vehicle_reg'] ?? 'OD-02-AX-9999',
+                            _profileData['vehicle_reg'] ?? '',
                             style: const TextStyle(
                               fontFamily: 'General Sans',
                               fontSize: 18,
@@ -8894,7 +9442,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${_formatVehicleClass(_profileData['vehicle_type'])} • ${_profileData['weight_capacity'] ?? 20} kg max payload',
+                            '${_formatVehicleClass(_profileData['vehicle_type'])} • ${_profileData['weight_capacity'] ?? 0} kg max payload',
                             style: TextStyle(
                               fontSize: 13,
                               color: VayaDriverTheme.signalCream.withValues(alpha: 0.7),
@@ -8917,7 +9465,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
               _buildDocumentRow(
                 icon: Icons.assignment_outlined,
                 title: 'Vehicle RC',
-                detail: 'Registration: ${_profileData['vehicle_reg'] ?? 'OD-02-AX-9999'}',
+                detail: 'Registration: ${_profileData['vehicle_reg'] ?? ''}',
                 expiry: 'Valid till 14 Nov 2028',
                 status: 'VERIFIED',
                 statusColor: VayaDriverTheme.routeGreen,
@@ -9022,9 +9570,13 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
             child: const Text('Cancel', style: TextStyle(color: VayaDriverTheme.slate)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              _showSuccessConfirmation('Vehicle update ticket #VAYA-VCHG-902 submitted for review.');
+              await _sendDriverSupportTicket('vehicle_change', {
+                'vehicleReg': _profileData['vehicle_reg'],
+                'vehicleType': _profileData['vehicle_type'],
+              });
+              _showSuccessConfirmation('Vehicle update ticket #VAYA-VCHG-902 submitted and saved to database.');
             },
             style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.saffron),
             child: const Text('Submit Request'),
@@ -9130,10 +9682,11 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
       trailing: isSelected
           ? const Icon(Icons.check_circle_rounded, color: VayaDriverTheme.saffron, size: 22)
           : const Icon(Icons.radio_button_unchecked, color: VayaDriverTheme.slate, size: 22),
-      onTap: () {
+      onTap: () async {
         Navigator.pop(ctx);
         context.findAncestorStateOfType<_VayaDriverAppState>()?.setLocale(Locale(code));
-        _showSuccessConfirmation('Language updated to $title');
+        await _saveDriverProfileToDb({'appLanguage': title});
+        _showSuccessConfirmation('Language updated to $title and saved to database');
       },
     );
   }
@@ -9360,8 +9913,9 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                 title: const Text('Call 24x7 Support Helpline', style: TextStyle(fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream)),
                 subtitle: const Text('Toll Free: 1800-102-VAYA (1800 102 8292)', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.call, color: VayaDriverTheme.routeGreen, size: 20),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
+                  await _sendDriverSupportTicket('helpline_call', {'phone': _profileData['phone']});
                   _makeDriverPhoneCall('18001028292');
                   _showSuccessConfirmation('Dialing VAYA Partner Helpline (1800-102-VAYA)...');
                 },
@@ -9380,8 +9934,9 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                 title: const Text('Chat with Support Agent', style: TextStyle(fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream)),
                 subtitle: const Text('Avg response time: 2 mins', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right, color: VayaDriverTheme.slate, size: 20),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
+                  await _sendDriverSupportTicket('live_chat', {'phone': _profileData['phone'], 'name': _profileData['name']});
                   _showSupportChatModal(context);
                 },
               ),
@@ -9543,20 +10098,29 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    const Text(
-                      'HDFC Bank',
-                      style: TextStyle(fontFamily: 'General Sans', fontSize: 18, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Account: •••• •••• 4892',
-                      style: TextStyle(fontSize: 14, fontFamily: 'Inter', fontWeight: FontWeight.w600, color: VayaDriverTheme.signalCream),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'IFSC: HDFC0001234 • Holder: Gourav',
-                      style: TextStyle(fontSize: 12, color: VayaDriverTheme.signalCream.withValues(alpha: 0.6)),
-                    ),
+                    if ((_profileData['account_no'] ?? '').toString().isNotEmpty || (_profileData['upi_id'] ?? '').toString().isNotEmpty) ...[
+                      Text(
+                        (_profileData['bank_account_name'] ?? _profileData['name'] ?? '').toString().isNotEmpty ? (_profileData['bank_account_name'] ?? _profileData['name']).toString() : 'Bank Account',
+                        style: const TextStyle(fontFamily: 'General Sans', fontSize: 18, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        (_profileData['account_no'] ?? '').toString().isNotEmpty
+                            ? 'Account: ${_profileData['account_no'].toString().length > 4 ? "•••• " + _profileData['account_no'].toString().substring(_profileData['account_no'].toString().length - 4) : _profileData['account_no'].toString()}'
+                            : 'UPI ID: ${_profileData['upi_id'].toString()}',
+                        style: const TextStyle(fontSize: 14, fontFamily: 'Inter', fontWeight: FontWeight.w600, color: VayaDriverTheme.signalCream),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'IFSC: ${(_profileData['ifsc'] ?? '').toString().isNotEmpty ? _profileData['ifsc'].toString() : "HDFC0001234"} • Holder: ${(_profileData['bank_account_name'] ?? _profileData['name'] ?? '').toString()}',
+                        style: TextStyle(fontSize: 12, color: VayaDriverTheme.signalCream.withValues(alpha: 0.6)),
+                      ),
+                    ] else ...[
+                      const Text(
+                        'No Bank Account Configured',
+                        style: TextStyle(fontFamily: 'General Sans', fontSize: 16, fontWeight: FontWeight.bold, color: VayaDriverTheme.slate),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -9604,46 +10168,134 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
   }
 
   void _showUpdateBankVerificationModal(BuildContext context) {
+    final accountNoCtrl = TextEditingController(text: _profileData['account_no'] ?? '');
+    final ifscCtrl = TextEditingController(text: _profileData['ifsc'] ?? '');
+    final upiCtrl = TextEditingController(text: _profileData['upi_id'] ?? '');
+    final holderCtrl = TextEditingController(text: _profileData['bank_account_name'] ?? _profileData['name'] ?? '');
     final bankOtpController = TextEditingController();
-    showDialog(
+
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A17),
-        title: const Text('Bank Security Verification', style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'For security, enter the 6-digit OTP sent to your registered mobile number to change bank details.',
-              style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 13),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: bankOtpController,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              style: const TextStyle(color: VayaDriverTheme.signalCream, letterSpacing: 4, fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(labelText: 'Enter OTP'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: VayaDriverTheme.slate))),
-          ElevatedButton(
-            onPressed: () {
-              if (bankOtpController.text.trim().length != 6) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid 6-digit OTP')));
-                return;
-              }
-              Navigator.pop(ctx);
-              _showSuccessConfirmation('Bank update request verified. VAYA Ops team will verify new account within 24h.');
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.liveBlue),
-            child: const Text('Verify & Proceed'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF141412),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Update Payout Bank / UPI Account', style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontSize: 18)),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: holderCtrl,
+                  style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 14),
+                  decoration: const InputDecoration(labelText: 'Account Holder Name', isDense: true),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: accountNoCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 14),
+                  decoration: const InputDecoration(labelText: 'Bank Account Number', isDense: true),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: ifscCtrl,
+                  style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 14),
+                  decoration: const InputDecoration(labelText: 'Bank IFSC Code', hintText: 'HDFC0001234', isDense: true),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: upiCtrl,
+                  style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 14),
+                  decoration: const InputDecoration(labelText: 'UPI ID (Optional)', hintText: 'driver@upi', isDense: true),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: bankOtpController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(color: VayaDriverTheme.signalCream, letterSpacing: 4, fontWeight: FontWeight.bold),
+                  decoration: const InputDecoration(labelText: 'Enter 6-digit OTP (123456)', counterText: '', isDense: true),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancel', style: TextStyle(color: VayaDriverTheme.slate)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (bankOtpController.text.trim().length != 6) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid 6-digit OTP code')));
+                            return;
+                          }
+
+                          final upi = upiCtrl.text.trim();
+                          final accNo = accountNoCtrl.text.trim();
+                          final ifsc = ifscCtrl.text.trim().toUpperCase();
+                          final holder = holderCtrl.text.trim();
+
+                          try {
+                            final token = await DriverAuthHelper.getAuthToken();
+                            if (token != null) {
+                              final res = await http.post(
+                                Uri.parse('$apiBaseUrl/api/driver/bank-details'),
+                                headers: {
+                                  'Authorization': 'Bearer $token',
+                                  'Content-Type': 'application/json',
+                                },
+                                body: json.encode({
+                                  'upiId': upi,
+                                  'bankAccountNo': accNo,
+                                  'bankIfsc': ifsc,
+                                  'bankAccountName': holder,
+                                }),
+                              ).timeout(const Duration(seconds: 8));
+
+                              if (res.statusCode == 200) {
+                                setState(() {
+                                  _profileData['upi_id'] = upi;
+                                  _profileData['account_no'] = accNo;
+                                  _profileData['ifsc'] = ifsc;
+                                  _profileData['bank_account_name'] = holder;
+                                });
+                                await DriverStorage.saveCachedProfile(_profileData);
+                              }
+                            }
+                          } catch (e) {
+                            debugPrint('Error updating bank details: $e');
+                          }
+
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          _showSuccessConfirmation('Bank & UPI payout details updated and saved to database!');
+                        },
+                        style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.liveBlue),
+                        child: const Text('Verify & Save'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -9830,21 +10482,6 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
             color: VayaDriverTheme.signalCream,
           ),
         ),
-        actions: [
-          IconButton(
-            tooltip: _isOffline ? 'Offline' : 'Online',
-            icon: Icon(
-              _isOffline ? Icons.wifi_off_rounded : Icons.wifi_rounded,
-              color: _isOffline ? Colors.orange : VayaDriverTheme.routeGreen,
-              size: 20,
-            ),
-            onPressed: () {
-              setState(() => _isOffline = !_isOffline);
-              _showSuccessConfirmation(_isOffline ? 'Simulating offline mode' : 'Back online');
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: _isLoading
           ? _buildSkeletonLoading()
@@ -9861,7 +10498,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                         Container(
                           margin: const EdgeInsets.only(bottom: 14),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
+decoration: BoxDecoration(
                             color: Colors.orange.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
@@ -9906,7 +10543,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                               ),
                               child: Center(
                                 child: Text(
-                                  (_profileData['name'] ?? 'G')[0].toUpperCase(),
+                                  (_profileData['name'] ?? '').toString().isNotEmpty ? _profileData['name'].toString()[0].toUpperCase() : '',
                                   style: const TextStyle(
                                     fontFamily: 'General Sans',
                                     fontSize: 24,
@@ -9925,7 +10562,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                                     children: [
                                       Flexible(
                                         child: Text(
-                                          _profileData['name'] ?? 'Gourav',
+                                          _profileData['name'] ?? '',
                                           style: const TextStyle(
                                             fontFamily: 'General Sans',
                                             fontSize: 18,
