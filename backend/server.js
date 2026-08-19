@@ -11,6 +11,14 @@ import { initDb, query } from './src/config/db.js';
 import { auth } from './src/config/firebase.js';
 import { registerClient, unregisterClient, broadcast } from './src/services/websocket.service.js';
 
+// ── Startup secret validation ────────────────────────────────────────────────
+// Audit fix High #3: fail hard if RAZORPAY_KEY_SECRET is unset so a bad deploy
+// does not silently leave payment HMAC verification broken.
+if (!process.env.RAZORPAY_KEY_SECRET) {
+  console.error('❌ FATAL: RAZORPAY_KEY_SECRET is not set. Refusing to start.');
+  process.exit(1);
+}
+
 // Route Imports
 import customerRouter from './src/routes/customer.routes.js';
 import driverRouter from './src/routes/driver.routes.js';
@@ -36,10 +44,14 @@ app.use(express.json({
 }));
 
 // CORS Configuration
+// Audit fix Medium #1: removed the `NODE_ENV === 'development'` short-circuit
+// which allowed every origin when the env var was not set (the default in Cloud Run).
+// Use the explicit CORS_DEV_BYPASS=true env var in local dev if a wildcard is needed.
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*').split(',').map(o => o.trim()).filter(Boolean);
+const corsDevBypass = process.env.CORS_DEV_BYPASS === 'true';
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*') || process.env.NODE_ENV === 'development') {
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*') || corsDevBypass) {
       callback(null, true);
     } else {
       callback(new Error('Blocked by CORS policy'));
@@ -49,6 +61,9 @@ app.use(cors({
 }));
 
 // Rate Limiting
+// Audit fix Low #3: use req.originalUrl not req.path — inside the `/api/` mount
+// req.path strips the /api/ prefix, so /api/admin became /admin/ which never
+// matched '/api/admin'. Using originalUrl restores the intended behaviour.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5000, // Increased limit for real-time dashboard and multi-app polling
@@ -57,58 +72,31 @@ const limiter = rateLimit({
   message: { error: 'Too many requests, please try again later.' },
   skip: (req) => {
     // Skip rate limiting for admin and health check endpoints
-    return req.path.startsWith('/api/admin') || req.path.startsWith('/api/health');
+    return req.originalUrl.startsWith('/api/admin') || req.originalUrl.startsWith('/api/health');
   }
 });
 app.use('/api/', limiter);
 
 // Mount API Routes
 app.use('/api/customer', customerRouter);
+app.use('/api/partner', driverRouter);
 app.use('/api/driver', driverRouter);
-app.use('/api/booking', bookingRouter);
-app.use('/api/bookings', bookingRouter);
+app.use('/api/booking', bookingRouter);  // canonical mount — /api/bookings alias removed (audit LOW)
 app.use('/api/ledger', ledgerRouter);
 app.use('/api/payment', paymentRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/health', healthRouter);
 
-// Top-level state endpoint for web portal & public web dynamic synchronization
-app.get('/api/state', async (req, res) => {
-  try {
-    const driversRes = await query('SELECT id, name, phone, vehicle_type AS "vehicleType", vehicle_reg AS "vehicleReg", weight_capacity AS "weightCapacity", status, lat, lng FROM drivers');
-    const bookingsRes = await query('SELECT * FROM bookings ORDER BY created_at DESC LIMIT 50');
-    const customersRes = await query('SELECT * FROM customers');
-    res.json({
-      drivers: driversRes.rows,
-      bookings: bookingsRes.rows,
-      customers: customersRes.rows
-    });
-  } catch (err) {
-    console.error('GET /api/state error:', err);
-    res.status(500).json({ error: 'Failed to fetch state' });
-  }
-});
+// /api/state endpoint REMOVED — Audit Critical #1.
+// This endpoint was unauthenticated and returned the full database including
+// live OTPs, customer PII, and driver coordinates. The web portal reads all
+// data it needs through /api/admin/* which is properly gated with verifyToken
+// + requireRole('admin').
 
-// Direct top-level pricing config endpoint
-app.get('/api/pricing-config', async (req, res) => {
-  try {
-    const result = await query('SELECT * FROM pricing_config');
-    const pricing = result.rows.map(r => ({
-      vehicle_type: r.vehicle_type,
-      base_price: parseFloat(r.base_price),
-      base_distance: parseFloat(r.base_distance),
-      per_km_price: parseFloat(r.per_km_price),
-      description: r.description || '',
-      free_wait_minutes_pickup: parseInt(r.free_wait_minutes_pickup ?? 10),
-      free_wait_minutes_dropoff: parseInt(r.free_wait_minutes_dropoff ?? 10),
-      wait_charge_per_minute: parseFloat(r.wait_charge_per_minute ?? 2.00)
-    }));
-    res.json({ pricing });
-  } catch (err) {
-    console.error('GET /api/pricing-config error:', err);
-    res.status(500).json({ error: 'Failed to fetch pricing configuration' });
-  }
-});
+// /api/pricing-config (top-level) intentionally removed — M5 audit fix.
+// All pricing reads now go through GET /api/booking/pricing-config (canonical).
+// The web portal was already reading from /api/health/pricing-config which now
+// returns the same normalized shape as the booking endpoint.
 
 // Global Error Handler
 app.use((err, req, res, next) => {

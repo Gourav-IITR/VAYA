@@ -29,8 +29,9 @@
         android:label="VAYA Partner"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:fullBackupContent="false"
-        android:usesCleartextTraffic="true">
+        android:fullBackupContent="false">
+        <!-- android:usesCleartextTraffic removed — Audit Medium #3. -->
+        <!-- Release builds must not permit plain-HTTP connections. -->
 
         <meta-data
             android:name="flutterEmbedding"
@@ -60,12 +61,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Location foreground service for active driver background GPS tracking -->
-        <service
-            android:name=".LocationForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="location" />
 
         <service
             android:name="com.google.firebase.messaging.FirebaseMessagingService"

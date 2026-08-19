@@ -1,20 +1,20 @@
 # Google Play Store Compliance & Publishing Checklist
 
-This document details the configuration requirements to publish both VAYA Customer and VAYA Driver Flutter applications to the Google Play Store, fully compliant with modern Android API requirements.
+This document details the configuration requirements to publish both VAYA Customer and VAYA Partner Flutter applications to the Google Play Store, fully compliant with modern Android API requirements.
 
 ---
 
 ## 1. SDK Target & Build Optimization (API Level 35)
 To publish on Google Play, applications must target Android SDK 35+.
 
-Ensure the following configuration in both `customer_app/android/app/build.gradle` and `driver_app/android/app/build.gradle`:
+Ensure the following configuration in both `customer_app/android/app/build.gradle` and `partner_app/android/app/build.gradle`:
 
 ```groovy
 android {
     compileSdkVersion 35
 
     defaultConfig {
-        applicationId "com.vaya.customer_app" // com.vaya.driver_app
+        applicationId "com.vaya.customer_app" // com.vaya.partner_app
         minSdkVersion 23
         targetSdkVersion 35
         versionCode 1
@@ -34,12 +34,12 @@ android {
 
 ---
 
-## 2. Background Location Declaration (Driver App)
-The driver app tracks vehicle positions even when minimized. Google Play enforces strict rules for background location access.
+## 2. Background Location Declaration (Partner App)
+The partner app tracks vehicle positions even when minimized. Google Play enforces strict rules for background location access.
 
 ### Requirements
 1. **AndroidManifest.xml Configuration**:
-   Declare permissions in `driver_app/android/app/src/main/AndroidManifest.xml`:
+   Declare permissions in `partner_app/android/app/src/main/AndroidManifest.xml`:
    ```xml
    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

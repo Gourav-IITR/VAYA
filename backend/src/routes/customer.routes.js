@@ -6,23 +6,18 @@ import { auth } from '../config/firebase.js';
 
 const router = express.Router();
 
-// GET /api/customer/me - Get current customer profile (Auto-creates customer if missing)
+// GET /api/customer/me - Get current customer profile
 router.get('/me', verifyToken, async (req, res) => {
   try {
     const uid = req.user.uid;
     let result = await query('SELECT * FROM customers WHERE id = $1', [uid]);
     if (result.rows.length === 0) {
-      const phone = (req.user.phone_number && req.user.phone_number.trim().length > 0)
-        ? req.user.phone_number.trim()
-        : (req.user.email || '');
-      const name = req.user.name || '';
-      result = await query(
-        `INSERT INTO customers (id, phone, name)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-         RETURNING *`,
-        [uid, phone, name]
-      );
+      return res.json({ exists: false });
+    }
+    // D4-fix: block deleted accounts – enforced here so a re-login with the
+    // same Firebase UID is immediately rejected at the profile fetch.
+    if (result.rows[0].account_status === 'deleted') {
+      return res.status(403).json({ error: 'Account has been deactivated.' });
     }
     return res.json({ exists: true, customer: result.rows[0] });
   } catch (err) {
@@ -31,11 +26,33 @@ router.get('/me', verifyToken, async (req, res) => {
   }
 });
 
-// GET /api/customer/:phone - Lookup customer profile by phone (legacy support / verify before onboarding)
+// GET /api/customer/:phone - Lookup customer profile by phone.
+// Audit fix High #1 (IDOR): any authenticated user could enumerate the full
+// customer profile for any 10-digit phone number. Now:
+//   - Admins get the full row.
+//   - The caller gets the full row only if the phone matches their own Firebase
+//     phone_number claim (i.e. they are the account owner).
+//   - Everyone else receives only { exists: bool } — no customer data.
 router.get('/:phone', verifyToken, async (req, res) => {
   try {
     const { phone } = req.params;
-    const result = await query('SELECT * FROM customers WHERE phone = $1', [phone]);
+    const callerRole = req.user.role;
+    const callerPhone = req.user.phone_number || '';
+
+    const isAdmin = callerRole === 'admin';
+    const isOwner = callerPhone.replace(/^\+91/, '') === phone.replace(/^\+91/, '');
+
+    if (!isAdmin && !isOwner) {
+      // Third-party caller: just reveal existence, no PII.
+      const result = await query('SELECT 1 FROM customers WHERE phone = $1', [phone]);
+      return res.json({ exists: result.rows.length > 0 });
+    }
+
+    // Admin or account owner: return the full profile.
+    const result = await query(
+      'SELECT id, phone, name, email, company_name, gstin, billing_address, gst_status, wallet_balance, account_status, created_at FROM customers WHERE phone = $1',
+      [phone]
+    );
     if (result.rows.length > 0) {
       return res.json({ exists: true, customer: result.rows[0] });
     }

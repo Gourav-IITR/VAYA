@@ -82,11 +82,11 @@ For pushing cargo alerts and job matching notifications:
    VITE_FIREBASE_APP_ID=your-app-id
    ```
 
-### Android Apps (Customer & Driver)
+### Android Apps (Customer & Partner)
 1. Click **Add app** → Android icon.
 2. Register two separate app packages matching your Flutter files:
-   - Customer app: `com.example.customer_app` (or yours)
-   - Driver app: `com.example.driver_app` (or yours)
+   - Customer app: `com.vaya.customer_app`
+   - Partner app: `com.vaya.partner_app`
 3. Download `google-services.json` for each and place them in:
    - `customer_app/android/app/google-services.json`
-   - `driver_app/android/app/google-services.json`
+   - `partner_app/android/app/google-services.json`

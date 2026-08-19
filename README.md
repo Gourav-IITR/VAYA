@@ -101,7 +101,7 @@ GoodsDeliveryApp/
 │   ├── assets/                 # Images and SVG icons
 │   └── android/                # Android platform config (build.gradle, manifests)
 │
-├── driver_app/                 # Flutter Driver Partner App (Android)
+├── partner_app/                # Flutter Driver Partner App (Android)
 │   ├── pubspec.yaml            # v1.0.10+11 | Dart ≥3.4.0
 │   ├── lib/
 │   │   ├── main.dart           # Complete app (duty toggle, trip workflow, earnings, ledger)
@@ -219,8 +219,8 @@ flutter pub get
 # Create android/key.properties (see SIGNING_SETUP.md)
 cd ..
 
-# 4. Driver app setup
-cd driver_app
+# 4. Partner app setup
+cd partner_app
 flutter pub get
 # Place google-services.json in android/app/
 # Create android/key.properties (see SIGNING_SETUP.md)
@@ -248,8 +248,8 @@ cd backend && node server.js
 # Customer App (connect device or start emulator first)
 cd customer_app && flutter run
 
-# Driver App
-cd driver_app && flutter run
+# Partner App
+cd partner_app && flutter run
 
 # Admin Dashboard (runs on port 5173)
 cd web_portal && npm run dev
@@ -343,7 +343,7 @@ cancelled
   - Speech-to-text address input
   - Contact picker for sender/receiver
 
-### Driver App (`driver_app/`)
+### Partner App (`partner_app/`)
 - **Package**: `com.vaya.partner_app`
 - **Version**: 1.0.10+11
 - **Features**:
@@ -365,8 +365,8 @@ cd customer_app
 flutter build apk --release
 # Output: build/app/outputs/flutter-apk/app-release.apk
 
-# Driver App
-cd driver_app
+# Partner App
+cd partner_app
 flutter build apk --release
 # Output: build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -375,7 +375,7 @@ flutter build apk --release
 
 ```bash
 cd customer_app && flutter build appbundle --release
-cd driver_app && flutter build appbundle --release
+cd partner_app && flutter build appbundle --release
 ```
 
 > **Important**: See `SIGNING_SETUP.md` for keystore generation and `key.properties` setup.

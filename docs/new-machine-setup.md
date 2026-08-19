@@ -122,19 +122,19 @@ flutter run
 
 ---
 
-## Step 5: Driver App Setup
+## Step 5: Partner App Setup
 
 ```bash
-cd driver_app
+cd partner_app
 flutter pub get
 ```
 
 ### Add Firebase Config
 1. Download `google-services.json` for package `com.vaya.partner_app`
-2. Place it at: `driver_app/android/app/google-services.json`
+2. Place it at: `partner_app/android/app/google-services.json`
 
 ### Add Signing Config
-Create `driver_app/android/key.properties`:
+Create `partner_app/android/key.properties`:
 ```properties
 storePassword=YOUR_KEYSTORE_PASSWORD
 keyPassword=YOUR_KEY_PASSWORD
@@ -143,7 +143,7 @@ storeFile=/path/to/your/upload-keystore.jks
 ```
 
 ### Add Google Maps API Key
-Create or edit `driver_app/android/local.properties`:
+Create or edit `partner_app/android/local.properties`:
 ```properties
 sdk.dir=/path/to/Android/sdk
 flutter.sdk=/path/to/flutter
@@ -250,9 +250,9 @@ These files are **git-ignored** (secrets) and must be manually transferred:
 |------|----------|-----------|
 | `serviceAccountKey.json` | `backend/` | Firebase Console → Service Accounts |
 | `google-services.json` | `customer_app/android/app/` | Firebase Console → Android App |
-| `google-services.json` | `driver_app/android/app/` | Firebase Console → Android App |
+| `google-services.json` | `partner_app/android/app/` | Firebase Console → Android App |
 | `key.properties` | `customer_app/android/` | Create manually (see Step 4) |
-| `key.properties` | `driver_app/android/` | Create manually (see Step 5) |
+| `key.properties` | `partner_app/android/` | Create manually (see Step 5) |
 | `upload-keystore.jks` | `~/` | Copy from old machine or generate new |
 | `.env` | `backend/` | Create manually (see Step 3) |
 | `.env` | `web_portal/` | Create manually (see Step 6) |
@@ -268,7 +268,7 @@ After setup, verify everything works:
 - [ ] `node backend/server.js` — Backend starts without errors
 - [ ] `curl http://localhost:5001/api/health` — Returns `200 OK`
 - [ ] `cd customer_app && flutter run` — App launches on device/emulator
-- [ ] `cd driver_app && flutter run` — App launches on device/emulator
+- [ ] `cd partner_app && flutter run` — App launches on device/emulator
 - [ ] `cd web_portal && npm run dev` — Dashboard opens in browser
 - [ ] `cd public_website && npm run dev` — Public site opens in browser
 
@@ -279,11 +279,11 @@ After setup, verify everything works:
 ```bash
 # Build release APKs
 cd customer_app && flutter build apk --release
-cd driver_app && flutter build apk --release
+cd partner_app && flutter build apk --release
 
 # Build release AABs (Play Store)
 cd customer_app && flutter build appbundle --release
-cd driver_app && flutter build appbundle --release
+cd partner_app && flutter build appbundle --release
 
 # Deploy everything to production
 ./deploy.sh
@@ -312,7 +312,7 @@ flutter config --android-sdk /path/to/Android/sdk
 ### Gradle build fails
 ```bash
 cd customer_app/android && ./gradlew clean
-cd driver_app/android && ./gradlew clean
+cd partner_app/android && ./gradlew clean
 ```
 
 ### Neon DB connection timeout

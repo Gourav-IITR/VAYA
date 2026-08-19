@@ -1,9 +1,10 @@
 import express from 'express';
+import crypto from 'crypto';
 import { body, param, validationResult } from 'express-validator';
 import { query, pool } from '../config/db.js';
 import { verifyToken } from '../middleware/auth.js';
 import { sendNotificationToUser, sendNotificationToDrivers, sendOrderStatusNotification } from '../services/notification.service.js';
-import { broadcast } from '../services/websocket.service.js';
+import { broadcast, broadcastToBookingParties } from '../services/websocket.service.js';
 import { evaluateDriverAccountStatus } from './ledger.routes.js';
 
 const router = express.Router();
@@ -19,6 +20,40 @@ const getDistanceKm = (lat1, lng1, lat2, lng2) => {
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+};
+
+/**
+ * Calculate the authoritative server-side fare.
+ * Includes helper fees (₹150 each, waived for bikes) and 5% GST on (base + helpers).
+ * Returns the computed cost in rupees, or null if no config found for vehicleType.
+ *
+ * @param {string} vehicleType
+ * @param {number} pickupLat
+ * @param {number} pickupLng
+ * @param {number} dropoffLat
+ * @param {number} dropoffLng
+ * @param {number} [helpers=0]  Number of helpers requested (0-2)
+ */
+const calculateServerFare = async (vehicleType, pickupLat, pickupLng, dropoffLat, dropoffLng, helpers = 0) => {
+  const configRes = await query(
+    'SELECT base_price, base_distance, per_km_price FROM pricing_config WHERE vehicle_type = $1',
+    [vehicleType]
+  );
+  if (configRes.rows.length === 0) return null;
+  const { base_price, base_distance, per_km_price } = configRes.rows[0];
+  const distanceKm = getDistanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
+  const extraKm = Math.max(0, distanceKm - parseFloat(base_distance));
+  const baseFare = parseFloat(base_price) + extraKm * parseFloat(per_km_price);
+
+  // Helper fee: ₹150 per helper, waived for bikes (bike drivers handle small loads solo)
+  const helperCount = (vehicleType === 'bike') ? 0 : Math.max(0, Math.min(2, parseInt(helpers) || 0));
+  const helperFee = helperCount * 150.0;
+
+  // 5% GST on (base fare + helper fee)
+  const gst = Math.round((baseFare + helperFee) * 0.05 * 100) / 100;
+
+  const total = baseFare + helperFee + gst;
+  return Math.round(total * 100) / 100;
 };
 
 // GET /api/booking/pricing-config - Public pricing config endpoint
@@ -104,8 +139,10 @@ const enrichBookingLiveLocation = (booking) => {
   if (!isOtpActiveState) {
     enriched.otp = null;
   } else if (!enriched.otp || enriched.otp === 'null' || enriched.otp === '') {
-    // Fallback default OTP if missing in active state
-    enriched.otp = '582914';
+    // OTP is missing for an active booking — this is a real data error, not a normal state.
+    // Return null so callers can surface a "contact support" message rather than showing
+    // a hardcoded constant that will always fail verification and leave the booking stuck.
+    enriched.otp = null;
   }
 
   if (!enriched.driver_id) return enriched;
@@ -456,8 +493,7 @@ router.post(
     body('dropoffLat').isFloat({ min: -90, max: 90 }),
     body('dropoffLng').isFloat({ min: -180, max: 180 }),
     body('vehicleType').isIn(['bike', 'three_wheeler', 'ace', 'truck']),
-    body('weight').isInt({ min: 1 }),
-    body('estimatedCost').isNumeric()
+    body('weight').isInt({ min: 1 })
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -472,23 +508,32 @@ router.post(
       const {
         pickupName, pickupLat, pickupLng,
         dropoffName, dropoffLat, dropoffLng,
-        vehicleType, weight, estimatedCost,
+        vehicleType, weight,
         senderName, senderPhone, receiverName, receiverPhone,
         goodsCategory, paymentMethod, paymentType, razorpayPaymentId,
-        cashCollectionPoint
+        cashCollectionPoint, helpers
       } = req.body;
+
+      // Server-side fare recalculation — never trust client-supplied cost.
+      // Helpers and 5% GST are included authoritatively server-side.
+      const resolvedHelpers = (vehicleType === 'bike') ? 0 : Math.max(0, Math.min(2, parseInt(helpers) || 0));
+      const estimatedCost = await calculateServerFare(vehicleType, pickupLat, pickupLng, dropoffLat, dropoffLng, resolvedHelpers);
+      if (estimatedCost === null) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `No pricing configuration found for vehicle type: ${vehicleType}` });
+      }
 
       // Determine payment type for booking record
       const resolvedPaymentType = (paymentType === 'online' || paymentType === 'wallet') ? paymentType : 'cash';
 
-      // For cash payments: cashCollectionPoint MUST be 'PICKUP' or 'DROPOFF'
-      const resolvedCashPoint = (resolvedPaymentType === 'cash')
-        ? (cashCollectionPoint === 'PICKUP' || cashCollectionPoint === 'DROPOFF' ? cashCollectionPoint : null)
-        : null;
-
-      if (resolvedPaymentType === 'cash' && !resolvedCashPoint) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Please select where driver should collect cash (At pickup or At drop-off).' });
+      // For cash payments: validate and require an explicit PICKUP or DROPOFF value
+      let resolvedCashPoint = null;
+      if (resolvedPaymentType === 'cash') {
+        if (cashCollectionPoint !== 'PICKUP' && cashCollectionPoint !== 'DROPOFF') {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `cashCollectionPoint must be 'PICKUP' or 'DROPOFF' for cash payments, got: '${cashCollectionPoint}'` });
+        }
+        resolvedCashPoint = cashCollectionPoint;
       }
 
       // Ensure customer profile exists in `customers` table before creating booking
@@ -547,20 +592,21 @@ router.post(
         [customerId]
       );
 
-      // Generate 6-digit OTP
-      const otp = String(Math.floor(100000 + Math.random() * 900000));
+      // Generate cryptographically-random 6-digit OTP.
+      // Audit fix High #4: Math.random() is not a CSPRNG; use crypto.randomInt.
+      const otp = String(crypto.randomInt(100000, 1000000));
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 mins expiry
 
       const insertBookingQuery = `
-        INSERT INTO bookings (customer_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, vehicle_type, weight, estimated_cost, otp, expires_at, sender_name, sender_phone, receiver_name, receiver_phone, goods_category, payment_method, payment_type, razorpay_payment_id, cash_collection_point)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        INSERT INTO bookings (customer_id, pickup_name, pickup_lat, pickup_lng, dropoff_name, dropoff_lat, dropoff_lng, vehicle_type, weight, estimated_cost, otp, expires_at, sender_name, sender_phone, receiver_name, receiver_phone, goods_category, payment_method, payment_type, razorpay_payment_id, cash_collection_point, helpers_count)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
         RETURNING *
       `;
       const bookingRes = await client.query(insertBookingQuery, [
         customerId, pickupName, pickupLat, pickupLng,
         dropoffName, dropoffLat, dropoffLng, vehicleType, weight, estimatedCost, otp, expiresAt,
         senderName || custName, senderPhone || custPhone, receiverName || '', receiverPhone || '', goodsCategory || '', paymentMethod || 'Cash',
-        resolvedPaymentType, razorpayPaymentId || null, resolvedCashPoint
+        resolvedPaymentType, razorpayPaymentId || null, resolvedCashPoint, resolvedHelpers
       ]);
       const booking = bookingRes.rows[0];
       booking.customer_phone = custPhone;
@@ -574,8 +620,10 @@ router.post(
 
       await client.query('COMMIT');
 
-      // Broadcast new booking created event to admins and drivers
-      broadcast({ type: 'booking_created', bookingId: booking.id, booking });
+      // Broadcast new booking created event to admins and drivers.
+      // Pre-assignment: no driver assigned yet — send to customer + admins only.
+      // Audit fix Critical #2: replaced broadcast() with scoped helper.
+      broadcastToBookingParties(customerId, null, { type: 'booking_created', bookingId: booking.id, booking });
 
       // Async: find nearby drivers and send FCM notifications
       const driversRes = await query(
@@ -671,8 +719,9 @@ router.post(
         return res.status(400).json({ error: 'Booking has expired.' });
       }
 
-      // 3. Update status & rotate/generate fresh 6-digit OTP on driver assignment
-      const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+      // 3. Update status & rotate/generate fresh 6-digit OTP on driver assignment.
+      // Audit fix High #4: use crypto.randomInt instead of Math.random.
+      const newOtp = String(crypto.randomInt(100000, 1000000));
       const updateBookingRes = await client.query(
         "UPDATE bookings SET driver_id = $1, status = 'accepted', otp = $2 WHERE id = $3 RETURNING *",
         [driverId, newOtp, bookingId]
@@ -696,10 +745,11 @@ router.post(
 
       await client.query('COMMIT');
 
-      // Broadcast state update
-      broadcast({ type: 'booking_accepted', bookingId, driverId, booking: updatedBooking });
+      // Broadcast state update to customer + driver + admins only.
+      // Audit fix Critical #2: replaced broadcast() with scoped helper.
+      broadcastToBookingParties(updatedBooking.customer_id, driverId, { type: 'booking_accepted', bookingId, driverId, booking: updatedBooking });
       
-      // Also broadcast driver status update
+      // Also broadcast driver status update (no PII — fine to send to all)
       broadcast({ type: 'driver_status', driverId, status: 'busy' });
 
       // Send FCM notification to customer
@@ -775,8 +825,9 @@ router.post(
       const baseFare = parseFloat(booking.estimated_cost || 0);
       const frozenPickupAmount = Math.round((baseFare + pickupWaitCharge) * 100) / 100;
 
-      // Transition to 'dropping_off' and generate fresh 6-digit drop-off verification OTP
-      const dropoffOtp = String(Math.floor(100000 + Math.random() * 900000));
+      // Transition to 'dropping_off' and generate fresh 6-digit drop-off verification OTP.
+      // Audit fix High #4: use crypto.randomInt instead of Math.random.
+      const dropoffOtp = String(crypto.randomInt(100000, 1000000));
       const updateRes = await client.query(
         `UPDATE bookings SET
           status = 'dropping_off',
@@ -791,15 +842,20 @@ router.post(
       );
       const updatedBooking = updateRes.rows[0];
 
+      // M1 fix: event_type matches the actual bookings.status value written above ('dropping_off'),
+      // not the legacy 'picking_up' alias that no writer ever produces.
       await client.query(
         'INSERT INTO booking_events (booking_id, event_type, description) VALUES ($1, $2, $3)',
-        [bookingId, 'picking_up', 'Cargo verified with customer OTP. Delivery is in transit.']
+        [bookingId, 'dropping_off', 'Cargo verified with customer OTP. Delivery is in transit.']
       );
 
       await client.query('COMMIT');
 
-      // Broadcast update
-      broadcast({ type: 'booking_transit', bookingId, booking: updatedBooking });
+      // Broadcast update to customer + driver + admins only.
+      // Audit fix Critical #2: this is the drop-off OTP broadcast — must be scoped.
+      // The sanitizePayload in websocket.service.js also strips 'otp' as a second
+      // defence-in-depth measure.
+      broadcastToBookingParties(updatedBooking.customer_id, updatedBooking.driver_id, { type: 'booking_transit', bookingId, booking: updatedBooking });
 
       sendOrderStatusNotification(bookingId, 'delivery_started');
 
@@ -848,8 +904,14 @@ router.post(
       let updatedBooking;
 
       // State machine logic
-      // State machine logic
       if (status === 'completed') {
+        // H1 fix: only the assigned driver or an admin may complete a booking.
+        // Customers are only allowed to send 'arrived_pickup', 'arrived_dropoff', or 'cancelled'.
+        // Allowing customers to send 'completed' bypasses the drop-off OTP gate entirely.
+        if (booking.driver_id !== userId && req.user.role !== 'admin') {
+          return res.status(403).json({ error: 'Only the assigned driver or an admin can complete a booking.' });
+        }
+
         if (booking.status !== 'dropping_off' && booking.status !== 'arrived_dropoff') {
           return res.status(400).json({ error: 'Cannot complete booking before picking up cargo.' });
         }
@@ -983,7 +1045,16 @@ router.post(
         if (booking.status === 'completed' || booking.status === 'expired') {
           return res.status(400).json({ error: 'Cannot cancel an already completed or expired booking.' });
         }
-        const updateRes = await client.query("UPDATE bookings SET status = 'cancelled' WHERE id = $1 RETURNING *", [bookingId]);
+
+        // M2 fix: compute and persist cancellation metadata, mirroring what DELETE /:id already does.
+        const isCustomerCancel = (userId === booking.customer_id);
+        const cancellerRole = isCustomerCancel ? 'Customer' : (userId === booking.driver_id ? 'Driver' : 'Admin');
+        const cancellationFee = booking.arrived_pickup_at ? 50.00 : 0.00;
+
+        const updateRes = await client.query(
+          `UPDATE bookings SET status = 'cancelled', cancelled_by = $1, cancelled_by_role = $2, cancellation_fee = $3 WHERE id = $4 RETURNING *`,
+          [userId, cancellerRole, cancellationFee, bookingId]
+        );
         updatedBooking = updateRes.rows[0];
 
         if (booking.driver_id) {
@@ -991,7 +1062,7 @@ router.post(
         }
         await client.query(
           'INSERT INTO booking_events (booking_id, event_type, description) VALUES ($1, $2, $3)',
-          [bookingId, 'cancelled', `Delivery cancelled by user: ${userId}`]
+          [bookingId, 'cancelled', `Delivery cancelled by ${cancellerRole} (${userId}). Fee: ₹${cancellationFee}`]
         );
       } else {
         // arrived_pickup or arrived_dropoff
@@ -1016,10 +1087,11 @@ router.post(
         await evaluateDriverAccountStatus(booking.driver_id);
       }
 
-      // Broadcast booking status change
-      broadcast({ type: 'booking_status', bookingId, status, booking: updatedBooking });
+      // Broadcast booking status change to parties only.
+      // Audit fix Critical #2: replaced broadcast() with scoped helper.
+      broadcastToBookingParties(booking.customer_id, booking.driver_id, { type: 'booking_status', bookingId, status, booking: updatedBooking });
 
-      // If status completed/cancelled, broadcast that driver is online again
+      // If status completed/cancelled, broadcast that driver is online again (no PII — fine for all)
       if ((status === 'completed' || status === 'cancelled') && booking.driver_id) {
         broadcast({ type: 'driver_status', driverId: booking.driver_id, status: 'online' });
       }
@@ -1429,6 +1501,27 @@ router.post(
            VALUES ($1, $2, 'platform_commission', $3, $4, $5)`,
           [driverId, bookingId, -commission, -currentDues, `Platform Commission (10% of ₹${fare})`]
         );
+
+        // C2 fix: deduct from customer wallet and record the transaction.
+        // Previously this block was missing from /complete-delivery (it only existed in /status),
+        // causing wallet payments to credit the driver without ever charging the customer.
+        if (paymentMethod === 'wallet' && booking.customer_id) {
+          const custWalletRes = await client.query(
+            'SELECT wallet_balance FROM customers WHERE id = $1 FOR UPDATE',
+            [booking.customer_id]
+          );
+          const custBalance = parseFloat(custWalletRes.rows[0]?.wallet_balance || 0);
+          const newCustBalance = Math.max(0, custBalance - fare);
+          await client.query(
+            'UPDATE customers SET wallet_balance = $1 WHERE id = $2',
+            [newCustBalance, booking.customer_id]
+          );
+          await client.query(
+            `INSERT INTO customer_wallet_transactions (customer_id, type, amount, balance_after, booking_id, description)
+             VALUES ($1, 'booking_payment', $2, $3, $4, $5)`,
+            [booking.customer_id, -fare, newCustBalance, realBookingId, `Booking fare payment (₹${fare})`]
+          );
+        }
       } else {
         currentDues += commission;
 

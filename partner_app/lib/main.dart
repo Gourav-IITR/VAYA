@@ -36,23 +36,59 @@ Future<void> _makeDriverPhoneCall(String phoneNumber) async {
   }
 }
 
-// Driver Session Storage Manager (SharedPreferences Disk Persistence)
-class DriverSessionManager {
-  static const String _keyIsLoggedIn = 'driver_is_logged_in_v2';
-  static const String _keyDriverData = 'driver_data_json_v2';
-  static const String _keyAuthToken = 'driver_auth_token_v2';
+/// Returns platform-optimized LocationSettings with Android Foreground Service & Apple background location tracking
+LocationSettings _getBackgroundLocationSettings({int distanceFilter = 10}) {
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    return AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: distanceFilter,
+      forceLocationManager: true,
+      intervalDuration: const Duration(seconds: 5),
+      foregroundNotificationConfig: const ForegroundNotificationConfig(
+        notificationTitle: "VAYA Partner Active",
+        notificationText: "Location streaming active for trips & online status",
+        notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+        enableWakeLock: true,
+      ),
+    );
+  } else if (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS) {
+    return AppleSettings(
+      accuracy: LocationAccuracy.high,
+      activityType: ActivityType.fitness,
+      distanceFilter: distanceFilter,
+      pauseLocationUpdatesAutomatically: false,
+      allowBackgroundLocationUpdates: true,
+      showBackgroundLocationIndicator: true,
+    );
+  }
+  return LocationSettings(
+    accuracy: LocationAccuracy.high,
+    distanceFilter: distanceFilter,
+  );
+}
 
-  static Future<void> saveSession(Map<String, dynamic> driverData, {String? token}) async {
+// Partner Session Storage Manager (SharedPreferences Disk Persistence)
+class PartnerSessionManager {
+  static const String _keyIsLoggedIn = 'partner_is_logged_in_v2';
+  static const String _keyPartnerData = 'partner_data_json_v2';
+  static const String _keyAuthToken = 'partner_auth_token_v2';
+
+  // Legacy fallback keys
+  static const String _legacyKeyIsLoggedIn = 'driver_is_logged_in_v2';
+  static const String _legacyKeyDriverData = 'driver_data_json_v2';
+  static const String _legacyKeyAuthToken = 'driver_auth_token_v2';
+
+  static Future<void> saveSession(Map<String, dynamic> partnerData, {String? token}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_keyIsLoggedIn, true);
-      await prefs.setString(_keyDriverData, json.encode(driverData));
+      await prefs.setString(_keyPartnerData, json.encode(partnerData));
       if (token != null && token.isNotEmpty) {
         await prefs.setString(_keyAuthToken, token);
       }
-      debugPrint("✅ Driver session saved to SharedPreferences");
+      debugPrint("✅ Partner session saved to SharedPreferences");
     } catch (e) {
-      debugPrint("Error saving driver session: $e");
+      debugPrint("Error saving partner session: $e");
     }
   }
 
@@ -68,7 +104,9 @@ class DriverSessionManager {
   static Future<String?> getSavedToken() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_keyAuthToken);
+      final token = prefs.getString(_keyAuthToken);
+      if (token != null && token.isNotEmpty) return token;
+      return prefs.getString(_legacyKeyAuthToken);
     } catch (e) {
       return null;
     }
@@ -77,13 +115,13 @@ class DriverSessionManager {
   static Future<Map<String, dynamic>?> getSavedSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final isLoggedIn = prefs.getBool(_keyIsLoggedIn) ?? false;
-      final rawJson = prefs.getString(_keyDriverData);
+      final isLoggedIn = prefs.getBool(_keyIsLoggedIn) ?? prefs.getBool(_legacyKeyIsLoggedIn) ?? false;
+      final rawJson = prefs.getString(_keyPartnerData) ?? prefs.getString(_legacyKeyDriverData);
       if (isLoggedIn && rawJson != null && rawJson.isNotEmpty) {
         return json.decode(rawJson) as Map<String, dynamic>;
       }
     } catch (e) {
-      debugPrint("Error reading driver session: $e");
+      debugPrint("Error reading partner session: $e");
     }
     return null;
   }
@@ -92,14 +130,19 @@ class DriverSessionManager {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_keyIsLoggedIn);
-      await prefs.remove(_keyDriverData);
+      await prefs.remove(_keyPartnerData);
       await prefs.remove(_keyAuthToken);
-      debugPrint("🔴 Driver session cleared from SharedPreferences");
+      await prefs.remove(_legacyKeyIsLoggedIn);
+      await prefs.remove(_legacyKeyDriverData);
+      await prefs.remove(_legacyKeyAuthToken);
+      debugPrint("🔴 Partner session cleared from SharedPreferences");
     } catch (e) {
-      debugPrint("Error clearing driver session: $e");
+      debugPrint("Error clearing partner session: $e");
     }
   }
 }
+
+typedef DriverSessionManager = PartnerSessionManager;
 
 class DriverStorage {
   static Future<List<dynamic>> loadCachedTrips() async {
@@ -207,7 +250,7 @@ class DriverStorage {
   }
 }
 
-class DriverAuthHelper {
+class PartnerAuthHelper {
   /// Central token provider: Waits for Firebase Auth disk restore if needed,
   /// fetches fresh token from Firebase, saves it locally, and falls back to local disk token when offline.
   static Future<String?> getAuthToken() async {
@@ -227,7 +270,7 @@ class DriverAuthHelper {
       try {
         final token = await user.getIdToken();
         if (token != null && token.isNotEmpty) {
-          await DriverSessionManager.saveToken(token);
+          await PartnerSessionManager.saveToken(token);
           return token;
         }
       } catch (e) {
@@ -236,13 +279,13 @@ class DriverAuthHelper {
     }
 
     // Fallback to locally saved token from disk
-    return await DriverSessionManager.getSavedToken();
+    return await PartnerSessionManager.getSavedToken();
   }
 
-  /// Handle 401 / Authorization Expiration globally for driver
+  /// Handle 401 / Authorization Expiration globally for partner
   static Future<void> handleUnauthorized(BuildContext context) async {
-    debugPrint("🔴 DriverAuthHelper: Expired/Invalid Authorization. Clearing driver session and redirecting to login.");
-    await DriverSessionManager.clearSession();
+    debugPrint("🔴 PartnerAuthHelper: Expired/Invalid Authorization. Clearing partner session and redirecting to login.");
+    await PartnerSessionManager.clearSession();
     try {
       await FirebaseAuth.instance.signOut();
     } catch (_) {}
@@ -256,19 +299,21 @@ class DriverAuthHelper {
       );
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const VayaDriverApp()),
+        MaterialPageRoute(builder: (_) => const VayaPartnerApp()),
         (route) => false,
       );
     }
   }
 }
 
+typedef DriverAuthHelper = PartnerAuthHelper;
+
 // Configuration URL - Change to your Cloud Run URL in production
 const String apiBaseUrl = "https://vaya-backend-275777907648.us-central1.run.app";
 const String wsBaseUrl = "wss://vaya-backend-275777907648.us-central1.run.app";
 
-// VAYA Driver App Theme (Ink Black / Slate / Saffron)
-class VayaDriverTheme {
+// VAYA Partner App Theme (Ink Black / Slate / Saffron)
+class VayaPartnerTheme {
   static const Color saffron = Color(0xFFF26430);
   static const Color inkBlack = Color(0xFF0E0E0C);
   static const Color routeGreen = Color(0xFF116E45);
@@ -339,13 +384,15 @@ class VayaDriverTheme {
   );
 }
 
-// i18n Strings dictionary for VAYA Driver Partner
-class LocalizedDriverStrings {
-  final Locale locale;
-  LocalizedDriverStrings(this.locale);
+typedef VayaDriverTheme = VayaPartnerTheme;
 
-  static LocalizedDriverStrings of(BuildContext context) {
-    return LocalizedDriverStrings(Localizations.localeOf(context));
+// i18n Strings dictionary for VAYA Partner
+class LocalizedPartnerStrings {
+  final Locale locale;
+  LocalizedPartnerStrings(this.locale);
+
+  static LocalizedPartnerStrings of(BuildContext context) {
+    return LocalizedPartnerStrings(Localizations.localeOf(context));
   }
 
   String _t(String en, String or, String hi) =>
@@ -449,6 +496,9 @@ class VayaHttpOverrides extends HttpOverrides {
   }
 }
 
+typedef LocalizedDriverStrings = LocalizedPartnerStrings;
+typedef VayaDriverApp = VayaPartnerApp;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kDebugMode) {
@@ -459,17 +509,17 @@ void main() async {
   } catch (e) {
     debugPrint("Firebase initialization skipped or already running: $e");
   }
-  runApp(const VayaDriverApp());
+  runApp(const VayaPartnerApp());
 }
 
-class VayaDriverApp extends StatefulWidget {
-  const VayaDriverApp({super.key});
+class VayaPartnerApp extends StatefulWidget {
+  const VayaPartnerApp({super.key});
 
   @override
-  State<VayaDriverApp> createState() => _VayaDriverAppState();
+  State<VayaPartnerApp> createState() => _VayaPartnerAppState();
 }
 
-class _VayaDriverAppState extends State<VayaDriverApp> {
+class _VayaPartnerAppState extends State<VayaPartnerApp> {
   Locale _locale = const Locale('en');
 
   void setLocale(Locale locale) {
@@ -500,10 +550,10 @@ class _VayaDriverAppState extends State<VayaDriverApp> {
   }
 }
 
-/// Driver Language Picker Screen
-class DriverLanguageSelectionScreen extends StatelessWidget {
+/// Partner Language Picker Screen
+class PartnerLanguageSelectionScreen extends StatelessWidget {
   final Function(Locale) onLanguageSelected;
-  const DriverLanguageSelectionScreen({super.key, required this.onLanguageSelected});
+  const PartnerLanguageSelectionScreen({super.key, required this.onLanguageSelected});
 
   @override
   Widget build(BuildContext context) {
@@ -520,7 +570,7 @@ class DriverLanguageSelectionScreen extends StatelessWidget {
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: VayaDriverTheme.saffron,
+                    color: VayaPartnerTheme.saffron,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Center(
@@ -544,7 +594,7 @@ class DriverLanguageSelectionScreen extends StatelessWidget {
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   height: 1.5,
-                  color: VayaDriverTheme.signalCream,
+                  color: VayaPartnerTheme.signalCream,
                 ),
               ),
               const SizedBox(height: 48),
@@ -579,16 +629,21 @@ class DriverLanguageSelectionScreen extends StatelessWidget {
   }
 }
 
-class DriverAuthWrapper extends StatefulWidget {
-  const DriverAuthWrapper({super.key});
+typedef DriverLanguageSelectionScreen = PartnerLanguageSelectionScreen;
+
+class PartnerAuthWrapper extends StatefulWidget {
+  const PartnerAuthWrapper({super.key});
 
   @override
-  State<DriverAuthWrapper> createState() => _DriverAuthWrapperState();
+  State<PartnerAuthWrapper> createState() => _PartnerAuthWrapperState();
 }
 
-class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
+typedef DriverAuthWrapper = PartnerAuthWrapper;
+
+class _PartnerAuthWrapperState extends State<PartnerAuthWrapper> {
   bool _loading = true;
   Map<String, dynamic>? _driverData;
+  bool _needsOnboarding = false;
 
   @override
   void initState() {
@@ -610,17 +665,21 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
     // 1. Check local disk session FIRST for instant cold-start auto-login
     final saved = await DriverSessionManager.getSavedSession();
     if (saved != null) {
-      debugPrint('[VAYA] Cold Start: Saved driver session found. Auto-logging driver partner in.');
-      await ensureMinLoaderTime();
-      if (mounted) {
-        setState(() {
-          _driverData = saved;
-          _loading = false;
-        });
+      final name = (saved['name'] as String?)?.trim() ?? '';
+      if (name.isNotEmpty) {
+        debugPrint('[VAYA] Cold Start: Saved driver session found. Auto-logging driver partner in.');
+        await ensureMinLoaderTime();
+        if (mounted) {
+          setState(() {
+            _driverData = saved;
+            _needsOnboarding = false;
+            _loading = false;
+          });
+        }
+        // Perform background sync to verify/refresh token & driver profile
+        _syncSessionInBackground();
+        return;
       }
-      // Perform background sync to verify/refresh token & driver profile
-      _syncSessionInBackground();
-      return;
     }
 
     // 2. If no local session, wait for Firebase Auth disk restoration
@@ -657,6 +716,8 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
       }
     }
 
+    bool shouldClearSession = false;
+
     try {
       final token = await user.getIdToken(true);
       if (token != null && token.isNotEmpty) {
@@ -670,36 +731,49 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
           final data = json.decode(res.body);
           if (data['exists'] == true && data['driver'] != null) {
             final driver = data['driver'];
-            await DriverSessionManager.saveSession(driver, token: token);
-            await ensureMinLoaderTime();
-            if (mounted) {
-              setState(() {
-                _driverData = driver;
-                _loading = false;
-              });
+            final name = (driver['name'] as String?)?.trim() ?? '';
+            if (name.isNotEmpty) {
+              await DriverSessionManager.saveSession(driver, token: token);
+              await ensureMinLoaderTime();
+              if (mounted) {
+                setState(() {
+                  _driverData = driver;
+                  _needsOnboarding = false;
+                  _loading = false;
+                });
+              }
+              return;
             }
-            return;
           }
+          shouldClearSession = true;
+        } else if (res.statusCode == 401 || res.statusCode == 403) {
+          shouldClearSession = true;
         }
       }
     } catch (e) {
       debugPrint('[VAYA] Error syncing driver session with user: $e');
     }
 
-    final defaultDriver = {
-      'id': user.uid,
-      'name': 'Driver Partner',
-      'phone': user.phoneNumber ?? '',
-      'vehicle_type': 'bike',
-      'is_approved': true,
-    };
-    await DriverSessionManager.saveSession(defaultDriver);
-    await ensureMinLoaderTime();
-    if (mounted) {
-      setState(() {
-        _driverData = defaultDriver;
-        _loading = false;
-      });
+    if (shouldClearSession) {
+      await DriverSessionManager.clearSession();
+      await ensureMinLoaderTime();
+      if (mounted) {
+        setState(() {
+          _driverData = null;
+          _needsOnboarding = true;
+          _loading = false;
+        });
+      }
+    } else {
+      final saved = await DriverSessionManager.getSavedSession();
+      await ensureMinLoaderTime();
+      if (mounted) {
+        setState(() {
+          _driverData = saved;
+          _needsOnboarding = saved == null;
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -759,7 +833,15 @@ class _DriverAuthWrapperState extends State<DriverAuthWrapper> {
     }
 
     if (_driverData != null) {
-      return DriverMainNavigation(driverData: _driverData!);
+      if (_driverData!['is_approved'] == true) {
+        return DriverMainNavigation(driverData: _driverData!);
+      } else {
+        return const PendingApprovalScreen();
+      }
+    }
+
+    if (_needsOnboarding) {
+      return const DriverOnboardingScreen();
     }
 
     return const DriverLoginScreen();
@@ -871,52 +953,44 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) {
-          final driver = (data['exists'] == true && data['driver'] != null)
-              ? data['driver']
-              : {
-                  'id': user.uid,
-                  'name': 'Driver Partner',
-                  'phone': user.phoneNumber ?? '',
-                  'vehicle_type': 'bike',
-                  'is_approved': true,
-                };
-          await DriverSessionManager.saveSession(driver);
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: driver)),
-            (route) => false,
-          );
+          if (data['exists'] == true && data['driver'] != null) {
+            final driver = data['driver'];
+            await DriverSessionManager.saveSession(driver);
+            if (driver['is_approved'] == true) {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: driver)),
+                (route) => false,
+              );
+            } else {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const PendingApprovalScreen()),
+                (route) => false,
+              );
+            }
+          } else {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const DriverOnboardingScreen()),
+              (route) => false,
+            );
+          }
         }
       } else {
-        final fallbackDriver = {
-          'id': user.uid,
-          'name': 'Driver Partner',
-          'phone': user.phoneNumber ?? '',
-          'vehicle_type': 'bike',
-          'is_approved': true,
-        };
-        await DriverSessionManager.saveSession(fallbackDriver);
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: fallbackDriver)),
+            MaterialPageRoute(builder: (_) => const DriverOnboardingScreen()),
             (route) => false,
           );
         }
       }
     } catch (e) {
-      final fallbackDriver = {
-        'id': user.uid,
-        'name': 'Driver Partner',
-        'phone': user.phoneNumber ?? '',
-        'vehicle_type': 'bike',
-        'is_approved': true,
-      };
-      await DriverSessionManager.saveSession(fallbackDriver);
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: fallbackDriver)),
+          MaterialPageRoute(builder: (_) => const DriverOnboardingScreen()),
           (route) => false,
         );
       }
@@ -1001,12 +1075,82 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
 }
 
 /// 2. Pending Approval Screen
-class PendingApprovalScreen extends StatelessWidget {
+class PendingApprovalScreen extends StatefulWidget {
   const PendingApprovalScreen({super.key});
+
+  @override
+  State<PendingApprovalScreen> createState() => _PendingApprovalScreenState();
+}
+
+class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
+  bool _isChecking = false;
+
+  Future<void> _checkStatus() async {
+    setState(() => _isChecking = true);
+    try {
+      final token = await DriverAuthHelper.getAuthToken();
+      if (token != null && token.isNotEmpty) {
+        final res = await http.get(
+          Uri.parse('$apiBaseUrl/api/driver/me'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          if (data['exists'] == true && data['driver'] != null) {
+            final driver = data['driver'];
+            await DriverSessionManager.saveSession(driver, token: token);
+            if (driver['is_approved'] == true) {
+              if (mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: driver)),
+                  (route) => false,
+                );
+              }
+              return;
+            }
+          }
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your application is still under review by VAYA administration.'),
+            backgroundColor: VayaDriverTheme.saffron,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error checking status: ${e.toString()}'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isChecking = false);
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    await DriverSessionManager.clearSession();
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
+        (route) => false,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: VayaDriverTheme.inkBlack,
       body: Padding(
         padding: const EdgeInsets.all(32.0),
         child: Column(
@@ -1028,14 +1172,16 @@ class PendingApprovalScreen extends StatelessWidget {
             ),
             const SizedBox(height: 48),
             ElevatedButton(
-              onPressed: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DriverLoginScreen()),
-                );
-              },
-              child: const Text('Check Status / Re-login'),
-            )
+              onPressed: _isChecking ? null : _checkStatus,
+              child: _isChecking
+                  ? const VayaLoader.inline(size: 20, color: Colors.white)
+                  : const Text('Check Approval Status'),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _signOut,
+              child: const Text('Sign Out', style: TextStyle(color: VayaDriverTheme.signalCream)),
+            ),
           ],
         ),
       ),
@@ -1095,13 +1241,13 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
           'name': _nameController.text.trim(),
           'vehicle_type': _vehicleType,
           'vehicle_reg': _plateController.text.trim().toUpperCase(),
-          'is_approved': true,
+          'is_approved': false,
         };
         await DriverSessionManager.saveSession(driverData);
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => DriverMainNavigation(driverData: driverData)),
+            MaterialPageRoute(builder: (_) => const PendingApprovalScreen()),
             (route) => false,
           );
         }
@@ -2354,10 +2500,33 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
       }
 
       String? fcmToken;
+      double? lat;
+      double? lng;
       if (online) {
         try {
           fcmToken = await FirebaseMessaging.instance.getToken();
         } catch (_) {}
+        try {
+          Position curPos = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 3),
+            ),
+          );
+          lat = curPos.latitude;
+          lng = curPos.longitude;
+          if (mounted) {
+            setState(() {
+              _currentPosition = LatLng(lat!, lng!);
+              _lastLocationSyncTime = DateTime.now();
+            });
+          }
+        } catch (e) {
+          if (_currentPosition != null) {
+            lat = _currentPosition!.latitude;
+            lng = _currentPosition!.longitude;
+          }
+        }
       }
 
       final response = await http.post(
@@ -2369,6 +2538,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
         body: json.encode({
           'status': online ? 'online' : 'offline',
           if (fcmToken != null) 'fcmToken': fcmToken,
+          if (lat != null) 'lat': lat,
+          if (lng != null) 'lng': lng,
         }),
       ).timeout(const Duration(seconds: 8));
 
@@ -2425,11 +2596,40 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
         return;
       }
 
+      // Send initial position immediately upon streaming start
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 4),
+          ),
+        );
+        if (mounted) {
+          setState(() {
+            _currentPosition = LatLng(pos.latitude, pos.longitude);
+            _lastLocationSyncTime = DateTime.now();
+          });
+        }
+        final token = await DriverAuthHelper.getAuthToken();
+        if (token != null) {
+          await http.post(
+            Uri.parse('$apiBaseUrl/api/driver/position'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token'
+            },
+            body: json.encode({
+              'lat': pos.latitude,
+              'lng': pos.longitude,
+            }),
+          );
+        }
+      } catch (e) {
+        debugPrint("Initial position sync error: $e");
+      }
+
       _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 10,
-        ),
+        locationSettings: _getBackgroundLocationSettings(distanceFilter: 10),
       ).listen(
         (Position pos) async {
           if (mounted) {
@@ -3563,6 +3763,22 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   bool _isCashCollectedConfirmed = false;
   bool _isPickupCashCollectedConfirmed = false;
 
+  bool get isPickupCash {
+    final point = (_job['cash_collection_point'] ?? _job['cashCollectionPoint'] ?? '').toString().toUpperCase();
+    if (point == 'PICKUP') return true;
+    final pType = (_job['payment_type'] ?? _job['paymentType'] ?? '').toString().toLowerCase();
+    final pMethod = (_job['payment_method'] ?? _job['paymentMethod'] ?? '').toString().toLowerCase();
+    if ((pType == 'cash' || pMethod.contains('cash')) && point != 'DROPOFF') {
+      return true;
+    }
+    return false;
+  }
+
+  String get pickupAmountDisplay {
+    final cost = double.tryParse(_job['estimated_cost']?.toString() ?? _job['estimatedCost']?.toString() ?? '') ?? 0.0;
+    return cost.toStringAsFixed(0);
+  }
+
   // Call tracking for customer-unreachable rule
   int _customerCallAttemptsCount = 0;
 
@@ -3577,10 +3793,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   void _startPositionTracking() {
     try {
       _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 5,
-        ),
+        locationSettings: _getBackgroundLocationSettings(distanceFilter: 5),
       ).listen((Position pos) async {
         _currentPosition = pos;
         try {
@@ -4184,12 +4397,9 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
     final activePhone = isPickupPhase ? senderPhone : receiverPhone;
 
     final fare = _job['estimated_cost']?.toString() ?? '72.38';
-    final pickupAmountDisplay = _job['pickup_amount']?.toString() ?? fare;
-    final isPickupCash = (_job['cash_collection_point'] == 'PICKUP' || (_job['payment_type'] == 'cash' && _job['cash_collection_point'] != 'DROPOFF'));
-
-    final topChipText = isPickupCash
-        ? 'Cash at pickup · ₹$pickupAmountDisplay'
-        : (_job['payment_type'] == 'cash' ? 'Cash at dropoff · ₹$fare' : 'Paid online · ₹$fare');
+    final topChipText = (_job['payment_type'] == 'cash' || _job['payment_method']?.toString().toLowerCase().contains('cash') == true)
+        ? 'Cash payment · ₹$fare'
+        : 'Paid online · ₹$fare';
 
     final shortBookingId = _job['id'].toString().substring(0, 8).toUpperCase();
 
@@ -6027,12 +6237,27 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
                     ),
                     child: Column(
                       children: [
-                        _buildTimelineItem('Booking Requested', dateStr, isDone: true),
-                        _buildTimelineItem('Driver Arrived at Pickup', dateStr, isDone: true),
-                        _buildTimelineItem('Trip In-Transit', dateStr, isDone: true),
+                        // D8-fix: use real per-milestone timestamps from the booking record.
+                        _buildTimelineItem(
+                          'Booking Requested',
+                          _formatDate(item['created_at']?.toString()) ?? dateStr,
+                          isDone: true,
+                        ),
+                        _buildTimelineItem(
+                          'Driver Arrived at Pickup',
+                          _formatDate(item['arrived_pickup_at']?.toString()) ?? '—',
+                          isDone: item['arrived_pickup_at'] != null,
+                        ),
+                        _buildTimelineItem(
+                          'Trip In-Transit',
+                          _formatDate(item['pickup_verified_at']?.toString()) ?? '—',
+                          isDone: item['pickup_verified_at'] != null,
+                        ),
                         _buildTimelineItem(
                           isCompleted ? 'Delivery Completed' : 'Trip Cancelled',
-                          dateStr,
+                          _formatDate(
+                            (isCompleted ? item['completed_at'] : item['cancelled_at'])?.toString(),
+                          ) ?? dateStr,
                           isDone: true,
                           isLast: true,
                         ),
@@ -6042,12 +6267,36 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
                   const SizedBox(height: 24),
 
                   // Report Issue Action Button
+                  // D10-fix: inlined support ticket POST (method lives in a different State class).
                   OutlinedButton.icon(
-                    onPressed: () {
+                    onPressed: () async {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Support ticket raised for $vayaId. Support will contact you shortly.')),
-                      );
+                      try {
+                        final token = await DriverAuthHelper.getAuthToken();
+                        if (token != null) {
+                          await http.post(
+                            Uri.parse('$apiBaseUrl/api/driver/support-ticket'),
+                            headers: {
+                              'Authorization': 'Bearer $token',
+                              'Content-Type': 'application/json',
+                            },
+                            body: json.encode({
+                              'type': 'trip_issue',
+                              'details': {
+                                'bookingId': item['id']?.toString() ?? '',
+                                'vayaId': vayaId,
+                              },
+                            }),
+                          ).timeout(const Duration(seconds: 8));
+                        }
+                      } catch (e) {
+                        debugPrint('Error creating trip issue ticket: $e');
+                      }
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Issue reported for $vayaId — support will reach you shortly.')),
+                        );
+                      }
                     },
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: VayaDriverTheme.slate),
@@ -7634,74 +7883,63 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
     );
   }
 
-  // Mandatory OTP Verification Dialog before Editing Saved Details
+  // D1-fix: dialog now gives an honest informational note instead of a fake OTP gate.
   void _showOtpVerificationDialog(BuildContext parentContext, VoidCallback onVerified) {
-    final otpController = TextEditingController();
-    bool isSubmitting = false;
-
     showDialog(
       context: parentContext,
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setOtpState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF181816),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Text(
-                'Security Verification',
-                style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontFamily: 'GeneralSans'),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'An OTP has been sent to your registered mobile number. Enter code to unlock payout details.',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: otpController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, letterSpacing: 8, fontSize: 20),
-                    textAlign: TextAlign.center,
-                    decoration: InputDecoration(
-                      hintText: '••••',
-                      hintStyle: const TextStyle(color: Color(0xFF64748B), letterSpacing: 8),
-                      filled: true,
-                      fillColor: const Color(0xFF1E1E1B),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2C2C28))),
+        return AlertDialog(
+          backgroundColor: const Color(0xFF181816),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            'Edit Payout Details',
+            style: TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, fontFamily: 'GeneralSans'),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: Colors.amber, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'OTP verification for payout changes will be enabled in a future update. You may edit your details now — changes are saved directly.',
+                        style: TextStyle(color: Color(0xFFD4B483), fontSize: 12, height: 1.4),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('CANCEL', style: TextStyle(color: Color(0xFF94A3B8))),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: VayaDriverTheme.saffron,
-                    foregroundColor: VayaDriverTheme.inkBlack,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: isSubmitting
-                      ? null
-                      : () async {
-                          setOtpState(() => isSubmitting = true);
-                          await Future.delayed(const Duration(milliseconds: 800));
-                          Navigator.pop(ctx);
-                          onVerified();
-                        },
-                  child: isSubmitting
-                      ? const VayaLoader.inline(size: 16, color: VayaDriverTheme.inkBlack)
-                      : const Text('VERIFY & EDIT', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCEL', style: TextStyle(color: Color(0xFF94A3B8))),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: VayaDriverTheme.saffron,
+                foregroundColor: VayaDriverTheme.inkBlack,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                onVerified();
+              },
+              child: const Text('Understood, Edit Details', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
         );
       },
     );
@@ -8952,11 +9190,12 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
     }
   }
 
-  Future<void> _sendDriverSupportTicket(String type, Map<String, dynamic> details) async {
+  // L4-fix: now returns the real ticket ID so callers can display it.
+  Future<String?> _sendDriverSupportTicket(String type, Map<String, dynamic> details) async {
     try {
       final token = await DriverAuthHelper.getAuthToken();
       if (token != null) {
-        await http.post(
+        final res = await http.post(
           Uri.parse('$apiBaseUrl/api/driver/support-ticket'),
           headers: {
             'Authorization': 'Bearer $token',
@@ -8964,10 +9203,15 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
           },
           body: json.encode({'type': type, 'details': details}),
         ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          return data['ticket']?['id']?.toString();
+        }
       }
     } catch (e) {
       debugPrint('Error creating driver support ticket: $e');
     }
+    return null;
   }
 
   Future<void> _refreshProfile() async {
@@ -9075,11 +9319,9 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
     );
     final emailController = TextEditingController(text: _profileData['email'] ?? '');
     
-    bool isVerifyingOtp = false;
     bool isSaving = false;
     String? phoneError;
     String? nameError;
-    final otpController = TextEditingController();
 
     showModalBottomSheet(
       context: context,
@@ -9125,9 +9367,9 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        isVerifyingOtp ? 'Verify Mobile OTP' : 'Edit Profile Details',
-                        style: const TextStyle(
+                      const Text(
+                        'Edit Profile Details',
+                        style: TextStyle(
                           fontFamily: 'General Sans',
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -9165,7 +9407,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                       ),
                     ),
 
-                  if (!isVerifyingOtp) ...[
+                  // D2-fix: form fields always shown — no OTP gate.
                     TextField(
                       controller: nameController,
                       style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 15),
@@ -9196,7 +9438,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                         prefixText: '+91 ',
                         errorText: phoneError,
                         prefixIcon: const Icon(Icons.phone_iphone_rounded, color: VayaDriverTheme.slate, size: 20),
-                        helperText: 'Changing mobile requires 6-digit OTP verification',
+                        helperText: 'Profile update saves directly to the database',
                         helperStyle: TextStyle(color: VayaDriverTheme.signalCream.withValues(alpha: 0.5), fontSize: 11),
                       ),
                     ),
@@ -9214,30 +9456,28 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                     ),
                     const SizedBox(height: 24),
 
+                    // D2-fix: remove fake OTP step — save name/phone/email directly.
                     ElevatedButton(
                       onPressed: (!hasChanges || nameError != null || phoneError != null || isSaving)
                           ? null
                           : () async {
-                              final newPhone = phoneController.text.trim();
-                              if (newPhone != initialPhone) {
-                                setSheetState(() => isVerifyingOtp = true);
-                              } else {
-                                setSheetState(() => isSaving = true);
-                                final newName = nameController.text.trim();
-                                final newEmail = emailController.text.trim();
-                                await _saveDriverProfileToDb({
-                                  'name': newName,
-                                  'email': newEmail,
-                                  'phone': _profileData['phone'],
+                              setSheetState(() => isSaving = true);
+                              final newName = nameController.text.trim();
+                              final newPhone = '+91${phoneController.text.trim()}';
+                              final newEmail = emailController.text.trim();
+                              await _saveDriverProfileToDb({
+                                'name': newName,
+                                'email': newEmail,
+                                'phone': newPhone,
+                              });
+                              if (sheetContext.mounted) {
+                                setState(() {
+                                  _profileData['name'] = newName;
+                                  _profileData['phone'] = newPhone;
+                                  _profileData['email'] = newEmail;
                                 });
-                                if (sheetContext.mounted) {
-                                  setState(() {
-                                    _profileData['name'] = newName;
-                                    _profileData['email'] = newEmail;
-                                  });
-                                  Navigator.pop(sheetContext);
-                                  _showSuccessConfirmation('Profile details updated successfully in database!');
-                                }
+                                Navigator.pop(sheetContext);
+                                _showSuccessConfirmation('Profile updated successfully!');
                               }
                             },
                       style: ElevatedButton.styleFrom(
@@ -9247,101 +9487,8 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                       ),
                       child: isSaving
                           ? const VayaLoader.inline(size: 20, color: Colors.white)
-                          : Text(newPhoneChanged(phoneController.text.trim(), initialPhone) ? 'VERIFY OTP & SAVE' : 'SAVE CHANGES'),
+                          : const Text('SAVE CHANGES'),
                     ),
-                  ] else ...[
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: VayaDriverTheme.saffron.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: VayaDriverTheme.saffron.withValues(alpha: 0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.mark_email_read_outlined, color: VayaDriverTheme.saffron),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Sent 6-digit OTP code to +91 ${phoneController.text.trim()}',
-                              style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 13, fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    TextField(
-                      controller: otpController,
-                      keyboardType: TextInputType.number,
-                      maxLength: 6,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.bold),
-                      decoration: const InputDecoration(
-                        labelText: 'Enter 6-digit OTP',
-                        counterText: '',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        TextButton(
-                          onPressed: () => setSheetState(() => isVerifyingOtp = false),
-                          child: const Text('Back to Edit', style: TextStyle(color: VayaDriverTheme.slate)),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            ScaffoldMessenger.of(sheetContext).showSnackBar(
-                              const SnackBar(content: Text('Resent OTP to new mobile number.')),
-                            );
-                          },
-                          child: const Text('Resend OTP', style: TextStyle(color: VayaDriverTheme.saffron, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    ElevatedButton(
-                      onPressed: isSaving
-                          ? null
-                          : () async {
-                              if (otpController.text.trim().length != 6) {
-                                ScaffoldMessenger.of(sheetContext).showSnackBar(
-                                  const SnackBar(content: Text('Please enter valid 6-digit OTP code')),
-                                );
-                                return;
-                              }
-                              setSheetState(() => isSaving = true);
-                              final newName = nameController.text.trim();
-                              final newPhone = '+91${phoneController.text.trim()}';
-                              final newEmail = emailController.text.trim();
-                              await _saveDriverProfileToDb({
-                                'name': newName,
-                                'phone': newPhone,
-                                'email': newEmail,
-                              });
-                              if (sheetContext.mounted) {
-                                setState(() {
-                                  _profileData['name'] = newName;
-                                  _profileData['phone'] = newPhone;
-                                  _profileData['email'] = newEmail;
-                                });
-                                Navigator.pop(sheetContext);
-                                _showSuccessConfirmation('Mobile number & profile updated and saved to database!');
-                              }
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: VayaDriverTheme.saffron,
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      child: isSaving
-                          ? const VayaLoader.inline(size: 20, color: Colors.white)
-                          : const Text('VERIFY & CONFIRM'),
-                    ),
-                  ],
                 ],
               ),
             );
@@ -9572,11 +9719,13 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await _sendDriverSupportTicket('vehicle_change', {
+              // L4-fix: use real ticket ID returned from the API.
+              final ticketId = await _sendDriverSupportTicket('vehicle_change', {
                 'vehicleReg': _profileData['vehicle_reg'],
                 'vehicleType': _profileData['vehicle_type'],
               });
-              _showSuccessConfirmation('Vehicle update ticket #VAYA-VCHG-902 submitted and saved to database.');
+              final ref = ticketId != null ? '#$ticketId' : 'submitted';
+              _showSuccessConfirmation('Vehicle update request $ref saved to database. Team will review shortly.');
             },
             style: ElevatedButton.styleFrom(backgroundColor: VayaDriverTheme.saffron),
             child: const Text('Submit Request'),
@@ -9684,7 +9833,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
           : const Icon(Icons.radio_button_unchecked, color: VayaDriverTheme.slate, size: 22),
       onTap: () async {
         Navigator.pop(ctx);
-        context.findAncestorStateOfType<_VayaDriverAppState>()?.setLocale(Locale(code));
+        (ctx.findAncestorStateOfType<State>() as dynamic)?.setLocale(Locale(code));
         await _saveDriverProfileToDb({'appLanguage': title});
         _showSuccessConfirmation('Language updated to $title and saved to database');
       },
@@ -9744,24 +9893,25 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
               ),
               const SizedBox(height: 8),
 
+              // D5-fix: replaced hardcoded 'FULL COMPLIANCE' with honest pending state.
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: VayaDriverTheme.routeGreen.withValues(alpha: 0.15),
+                  color: Colors.amber.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: VayaDriverTheme.routeGreen, width: 1.5),
+                  border: Border.all(color: Colors.amber, width: 1.5),
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.verified_user_rounded, color: VayaDriverTheme.routeGreen, size: 22),
+                    Icon(Icons.hourglass_top_rounded, color: Colors.amber, size: 22),
                     SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('FULL PARTNER COMPLIANCE', style: TextStyle(color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold, fontSize: 12)),
+                          Text('VERIFICATION PENDING', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 12)),
                           SizedBox(height: 2),
-                          Text('All required documents & background checks are active.', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 12)),
+                          Text('Your profile is under review by the VAYA team. You will be notified once verified.', style: TextStyle(color: VayaDriverTheme.signalCream, fontSize: 12)),
                         ],
                       ),
                     ),
@@ -9770,39 +9920,39 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
               ),
               const SizedBox(height: 16),
 
-              const Text('VERIFICATION TIMELINE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: VayaDriverTheme.slate)),
+              const Text('DOCUMENT CHECKLIST', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: VayaDriverTheme.slate)),
               const SizedBox(height: 12),
 
               _buildTimelineStep(
                 title: 'Driving Licence (DL)',
-                sub: 'Verified on 12 Jan 2024 • Valid till 2031',
-                status: 'VERIFIED',
-                statusColor: VayaDriverTheme.routeGreen,
-                icon: Icons.check_circle_rounded,
+                sub: 'Awaiting submission & review',
+                status: 'PENDING',
+                statusColor: Colors.amber,
+                icon: Icons.pending_outlined,
                 isLast: false,
               ),
               _buildTimelineStep(
                 title: 'Vehicle Registration (RC)',
-                sub: 'Verified on 12 Jan 2024 • Valid till 2028',
-                status: 'VERIFIED',
-                statusColor: VayaDriverTheme.routeGreen,
-                icon: Icons.check_circle_rounded,
+                sub: 'Awaiting submission & review',
+                status: 'PENDING',
+                statusColor: Colors.amber,
+                icon: Icons.pending_outlined,
                 isLast: false,
               ),
               _buildTimelineStep(
                 title: 'Government Identity Proof (Aadhaar/PAN)',
-                sub: 'Verified on 10 Jan 2024',
-                status: 'VERIFIED',
-                statusColor: VayaDriverTheme.routeGreen,
-                icon: Icons.check_circle_rounded,
+                sub: 'Awaiting submission & review',
+                status: 'PENDING',
+                statusColor: Colors.amber,
+                icon: Icons.pending_outlined,
                 isLast: false,
               ),
               _buildTimelineStep(
                 title: 'Bank Account & Cancelled Cheque',
-                sub: 'Verified on 15 Jan 2024',
-                status: 'VERIFIED',
-                statusColor: VayaDriverTheme.routeGreen,
-                icon: Icons.check_circle_rounded,
+                sub: 'Awaiting submission & review',
+                status: 'PENDING',
+                statusColor: Colors.amber,
+                icon: Icons.pending_outlined,
                 isLast: true,
               ),
               const SizedBox(height: 16),

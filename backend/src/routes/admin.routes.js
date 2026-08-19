@@ -57,53 +57,52 @@ router.get('/bookings', async (req, res) => {
   }
 });
 
-// GET /api/admin/drivers - List all drivers
-router.get('/drivers', async (req, res) => {
+// GET /api/admin/drivers (and /api/admin/partners) - List all drivers/partners
+const getPartnersHandler = async (req, res) => {
   try {
     const result = await query('SELECT * FROM drivers ORDER BY created_at DESC');
-    res.json({ drivers: result.rows });
+    res.json({ drivers: result.rows, partners: result.rows });
   } catch (err) {
-    console.error('GET /api/admin/drivers error:', err);
-    res.status(500).json({ error: 'Failed to fetch drivers list' });
+    console.error('GET /api/admin/partners error:', err);
+    res.status(500).json({ error: 'Failed to fetch partners list' });
   }
-});
+};
+router.get('/drivers', getPartnersHandler);
+router.get('/partners', getPartnersHandler);
 
-// PUT /api/admin/drivers/:id/approve - Approve registration
-router.put(
-  '/drivers/:id/approve',
-  [
-    param('id').notEmpty().withMessage('Driver UID is required')
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+// PUT /api/admin/drivers/:id/approve (and /api/admin/partners/:id/approve) - Approve registration
+const approvePartnerHandler = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const driverId = req.params.id;
+    const adminUid = req.user.uid;
+
+    const checkRes = await query('SELECT name FROM drivers WHERE id = $1', [driverId]);
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Partner profile not found.' });
     }
 
-    try {
-      const driverId = req.params.id;
-      const adminUid = req.user.uid;
+    await query('UPDATE drivers SET is_approved = TRUE WHERE id = $1', [driverId]);
 
-      const checkRes = await query('SELECT name FROM drivers WHERE id = $1', [driverId]);
-      if (checkRes.rows.length === 0) {
-        return res.status(404).json({ error: 'Driver profile not found.' });
-      }
+    // Log to audit log
+    await query(
+      'INSERT INTO audit_logs (admin_uid, action, details) VALUES ($1, $2, $3)',
+      [adminUid, 'approve_driver', `Approved partner account ${checkRes.rows[0].name} (UID: ${driverId})`]
+    );
 
-      await query('UPDATE drivers SET is_approved = TRUE WHERE id = $1', [driverId]);
-
-      // Log to audit log
-      await query(
-        'INSERT INTO audit_logs (admin_uid, action, details) VALUES ($1, $2, $3)',
-        [adminUid, 'approve_driver', `Approved driver account ${checkRes.rows[0].name} (UID: ${driverId})`]
-      );
-
-      res.json({ success: true, message: 'Driver approved successfully.' });
-    } catch (err) {
-      console.error('PUT /api/admin/drivers/:id/approve error:', err);
-      res.status(500).json({ error: 'Failed to approve driver account.' });
-    }
+    res.json({ success: true, message: 'Partner approved successfully.' });
+  } catch (err) {
+    console.error('PUT /api/admin/partners/:id/approve error:', err);
+    res.status(500).json({ error: 'Failed to approve partner account.' });
   }
-);
+};
+
+router.put('/drivers/:id/approve', [param('id').notEmpty().withMessage('Partner UID is required')], approvePartnerHandler);
+router.put('/partners/:id/approve', [param('id').notEmpty().withMessage('Partner UID is required')], approvePartnerHandler);
 
 // GET /api/admin/audit-log - Fetch audit logs
 router.get('/audit-log', async (req, res) => {

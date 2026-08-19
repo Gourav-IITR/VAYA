@@ -212,17 +212,9 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
     if (!_isOtpComplete) return false;
 
     final amountDue = double.tryParse(_settlement!['amountDueNow']?.toString() ?? '0') ?? 0.0;
-    final method = _settlement!['paymentMethod']?.toString().toLowerCase() ?? 'cash';
-    final paymentStatus = _settlement!['paymentStatus']?.toString() ?? 'payment_due';
 
-    if (amountDue > 0 && method == 'cash') {
+    if (amountDue > 0) {
       if (!_isCashCollectedConfirmed) return false;
-    }
-
-    if (amountDue > 0 && (method == 'online' || method == 'wallet')) {
-      if (paymentStatus != 'paid' && paymentStatus != 'support_override_approved') {
-        return false;
-      }
     }
 
     return true;
@@ -232,9 +224,8 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
     if (!_canSubmit) return;
 
     final amountDue = double.tryParse(_settlement!['amountDueNow']?.toString() ?? '0') ?? 0.0;
-    final method = _settlement!['paymentMethod']?.toString().toLowerCase() ?? 'cash';
 
-    if (amountDue > 0 && method == 'cash' && _isCashCollectedConfirmed) {
+    if (amountDue > 0 && _isCashCollectedConfirmed) {
       // Show confirmation dialog before recording cash collection
       final confirmed = await _showCashCollectionConfirmationDialog(amountDue);
       if (!confirmed) return;
@@ -1110,42 +1101,23 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: VayaDriverTheme.saffron),
                 ),
-                child: Column(
-                  children: [
-                    Text(
-                      'Waiting for ₹$amountDueNow payment from customer',
-                      style: const TextStyle(fontFamily: 'Inter', fontSize: 13, fontWeight: FontWeight.bold, color: VayaDriverTheme.saffron),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.center,
-                      children: [
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: VayaDriverTheme.saffron),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            minimumSize: Size.zero,
-                          ),
-                          onPressed: () => _fetchSettlementSummary(isRefresh: true),
-                          icon: const Icon(Icons.refresh, size: 14, color: VayaDriverTheme.saffron),
-                          label: const Text('Refresh status', style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: VayaDriverTheme.saffron)),
-                        ),
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: VayaDriverTheme.saffron),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            minimumSize: Size.zero,
-                          ),
-                          onPressed: _isNotifyingCustomer ? null : _notifyCustomerForPayment,
-                          icon: const Icon(Icons.notifications_active_outlined, size: 14, color: VayaDriverTheme.saffron),
-                          label: Text(_isNotifyingCustomer ? 'Sending...' : 'Notify customer', style: const TextStyle(fontFamily: 'Inter', fontSize: 11, color: VayaDriverTheme.saffron)),
-                        ),
-                      ],
-                    ),
-                  ],
+                child: Text(
+                  'Collect ₹$amountDueNow in cash for extra waiting time',
+                  style: const TextStyle(fontFamily: 'Inter', fontSize: 13.5, fontWeight: FontWeight.bold, color: VayaDriverTheme.saffron),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                activeColor: VayaDriverTheme.saffron,
+                value: _isCashCollectedConfirmed,
+                onChanged: (val) {
+                  setState(() => _isCashCollectedConfirmed = val ?? false);
+                },
+                title: Text(
+                  'I confirm that I collected ₹$amountDueNow in cash from the customer for extra waiting time.',
+                  style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500),
                 ),
               ),
             ],

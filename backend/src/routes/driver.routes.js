@@ -96,22 +96,13 @@ router.get('/earnings-stats', verifyToken, async (req, res) => {
   }
 });
 
-// GET /api/driver/me - Get current driver profile (Auto-creates driver if missing)
+// GET /api/driver/me - Get current driver profile
 router.get('/me', verifyToken, async (req, res) => {
   try {
     const uid = req.user.uid;
     let result = await query('SELECT * FROM drivers WHERE id = $1', [uid]);
     if (result.rows.length === 0) {
-      const phone = req.user.phone_number || req.user.email || '';
-      const name = req.user.name || '';
-      const defaultReg = '';
-      result = await query(
-        `INSERT INTO drivers (id, phone, name, vehicle_type, vehicle_reg, weight_capacity, status, is_approved)
-         VALUES ($1, $2, $3, 'bike', $4, 20, 'offline', TRUE)
-         ON CONFLICT (id) DO UPDATE SET is_approved = TRUE
-         RETURNING *`,
-        [uid, phone, name, defaultReg]
-      );
+      return res.json({ exists: false });
     }
     return res.json({ exists: true, driver: result.rows[0] });
   } catch (err) {
@@ -142,7 +133,7 @@ router.post(
   async (req, res) => {
     try {
       const uid = req.user.uid;
-      const { status, name, phone, email, appLanguage, vehicleType, vehicleReg, weightCapacity, fcmToken } = req.body;
+      const { status, name, phone, email, appLanguage, vehicleType, vehicleReg, weightCapacity, fcmToken, lat, lng } = req.body;
       
       // Check if driver profile already exists
       const existingRes = await query('SELECT * FROM drivers WHERE id = $1', [uid]);
@@ -191,9 +182,15 @@ router.post(
           updateParams.push(fcmToken);
           updateFields.push(`fcm_token = $${updateParams.length}`);
         }
+        if (lat !== undefined && lat !== null && !isNaN(parseFloat(lat))) {
+          updateParams.push(parseFloat(lat));
+          updateFields.push(`lat = $${updateParams.length}`);
+        }
+        if (lng !== undefined && lng !== null && !isNaN(parseFloat(lng))) {
+          updateParams.push(parseFloat(lng));
+          updateFields.push(`lng = $${updateParams.length}`);
+        }
 
-        // Always ensure is_approved is TRUE
-        updateFields.push(`is_approved = TRUE`);
         updateFields.push(`last_active_at = CURRENT_TIMESTAMP`);
 
         updateParams.push(uid);
@@ -207,7 +204,7 @@ router.post(
         const updateRes = await query(updateQuery, updateParams);
         driverData = updateRes.rows[0];
       } else {
-        // Driver profile does not exist - Perform INSERT
+        // Driver profile does not exist - Perform INSERT (New driver defaults to is_approved = FALSE)
         const nextPhone = (phone && phone.trim().length > 0) ? phone.trim() : (req.user.phone_number || '');
         const nextName = (name && name.trim().length > 0) ? name.trim() : (req.user.name || '');
         const nextEmail = (email && email.trim().length > 0) ? email.trim() : (req.user.email || null);
@@ -216,22 +213,25 @@ router.post(
         const nextVehReg = (vehicleReg && vehicleReg.trim().length > 0) ? vehicleReg.trim().toUpperCase() : '';
         const nextCap = weightCapacity ? parseInt(weightCapacity) : 20;
         const nextStatus = status || 'offline';
+        const nextLat = (lat !== undefined && lat !== null && !isNaN(parseFloat(lat))) ? parseFloat(lat) : null;
+        const nextLng = (lng !== undefined && lng !== null && !isNaN(parseFloat(lng))) ? parseFloat(lng) : null;
 
         const insertQuery = `
-          INSERT INTO drivers (id, phone, name, email, app_language, vehicle_type, vehicle_reg, weight_capacity, status, is_approved, fcm_token, last_active_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, $10, CURRENT_TIMESTAMP)
+          INSERT INTO drivers (id, phone, name, email, app_language, vehicle_type, vehicle_reg, weight_capacity, status, is_approved, fcm_token, lat, lng, last_active_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10, $11, $12, CURRENT_TIMESTAMP)
           ON CONFLICT (id)
           DO UPDATE SET 
             status = EXCLUDED.status,
             name = EXCLUDED.name,
             email = EXCLUDED.email,
-            is_approved = TRUE,
+            lat = COALESCE(EXCLUDED.lat, drivers.lat),
+            lng = COALESCE(EXCLUDED.lng, drivers.lng),
             last_active_at = CURRENT_TIMESTAMP,
             fcm_token = COALESCE(EXCLUDED.fcm_token, drivers.fcm_token)
           RETURNING *
         `;
 
-        const insertRes = await query(insertQuery, [uid, nextPhone, nextName, nextEmail, nextLang, nextVehType, nextVehReg, nextCap, nextStatus, fcmToken || null]);
+        const insertRes = await query(insertQuery, [uid, nextPhone, nextName, nextEmail, nextLang, nextVehType, nextVehReg, nextCap, nextStatus, fcmToken || null, nextLat, nextLng]);
         driverData = insertRes.rows[0];
       }
 
@@ -242,8 +242,12 @@ router.post(
         console.warn('Could not set custom user claims:', authErr.message);
       }
 
-      // Broadcast update
-      broadcast({ type: 'driver_status', driverId: uid, status: driverData.status, driver: driverData });
+      // Broadcast driver status update.
+      // Audit fix Critical #2 (defence-in-depth): explicitly exclude bank fields here.
+      // The sanitizePayload helper in websocket.service.js strips them too, but being
+      // explicit is safer. Never send bank_account_no / bank_ifsc / upi_id over WS.
+      const { bank_account_no, bank_ifsc, bank_account_name, upi_id, fcm_token, ...safeDriverData } = driverData;
+      broadcast({ type: 'driver_status', driverId: uid, status: safeDriverData.status, driver: safeDriverData });
 
       res.json({ success: true, driver: driverData });
     } catch (err) {
@@ -382,16 +386,21 @@ router.post(
   }
 );
 
-// GET /api/driver/nearby - Fetch nearby active drivers matching vehicle_type (Public / Read-only query)
-router.get('/nearby', async (req, res) => {
+// GET /api/driver/nearby - Fetch nearby active drivers matching vehicle_type
+// Audit fix Medium #6: requires authentication; caps radius; strips name + plate number
+// (the customer map only needs vehicle_type + coarse position before booking).
+router.get('/nearby', verifyToken, async (req, res) => {
   try {
     const { lat, lng, vehicle_type, radius } = req.query;
     const centerLat = parseFloat(lat) || 20.2961;
     const centerLng = parseFloat(lng) || 85.8245;
-    const radiusKm = parseFloat(radius) || 15.0;
+    // Cap radius at 20 km to prevent bulk scraping of driver positions.
+    const radiusKm = Math.min(parseFloat(radius) || 15.0, 20.0);
 
+    // Return only non-PII fields: id, vehicle_type, lat, lng, status.
+    // Omit name and vehicle_reg — not needed until the customer has an accepted booking.
     let queryText = `
-      SELECT id, name, vehicle_type, vehicle_reg, lat, lng, status
+      SELECT id, vehicle_type, lat, lng, status
       FROM drivers
       WHERE status IN ('online', 'busy') AND is_approved = TRUE AND lat IS NOT NULL AND lng IS NOT NULL
     `;
@@ -436,9 +445,7 @@ router.get('/nearby', async (req, res) => {
       ];
       drivers = offsets.map((off, idx) => ({
         id: `sim_${vehType}_${idx + 1}`,
-        name: `Nearby ${vehType.toUpperCase()} Partner ${idx + 1}`,
         vehicle_type: vehType,
-        vehicle_reg: `OD-02-VAYA-${idx + 1}`,
         lat: centerLat + off.dLat,
         lng: centerLng + off.dLng,
         status: 'online',

@@ -551,6 +551,39 @@ class VayaStorage {
   }
 }
 
+String formatIndianCurrency(double amount) {
+  final int val = amount.round();
+  final String str = val.toString();
+  if (str.length <= 3) return '₹$str';
+  final String last3 = str.substring(str.length - 3);
+  String other = str.substring(0, str.length - 3);
+  final List<String> parts = [];
+  while (other.length > 2) {
+    parts.insert(0, other.substring(other.length - 2));
+    other = other.substring(0, other.length - 2);
+  }
+  if (other.isNotEmpty) parts.insert(0, other);
+  return '₹${parts.join(',')},$last3';
+}
+
+String formatCurrencyTwoDecimals(double amount) {
+  final fixed = amount.toStringAsFixed(2);
+  final parts = fixed.split('.');
+  final intPart = int.parse(parts[0]);
+  final decPart = parts[1];
+  final str = intPart.toString();
+  if (str.length <= 3) return '₹$str.$decPart';
+  final last3 = str.substring(str.length - 3);
+  String other = str.substring(0, str.length - 3);
+  final List<String> commaParts = [];
+  while (other.length > 2) {
+    commaParts.insert(0, other.substring(other.length - 2));
+    other = other.substring(0, other.length - 2);
+  }
+  if (other.isNotEmpty) commaParts.insert(0, other);
+  return '₹${commaParts.join(',')},$last3.$decPart';
+}
+
 // Configuration URLs - Change to your Cloud Run URL in production
 const String apiBaseUrl = "https://vaya-backend-275777907648.us-central1.run.app";
 const String wsBaseUrl = "wss://vaya-backend-275777907648.us-central1.run.app";
@@ -697,6 +730,7 @@ class AuthWrapper extends StatefulWidget {
 class _AuthWrapperState extends State<AuthWrapper> {
   bool _loading = true;
   Map<String, dynamic>? _customerData;
+  bool _needsOnboarding = false;
 
   @override
   void initState() {
@@ -718,17 +752,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // 1. Check local disk session FIRST for instant cold-start auto-login
     final saved = await CustomerSessionManager.getSavedSession();
     if (saved != null) {
-      debugPrint('[VAYA] Cold Start: Saved session found. Auto-logging customer in.');
-      await ensureMinLoaderTime();
-      if (mounted) {
-        setState(() {
-          _customerData = saved;
-          _loading = false;
-        });
+      final name = (saved['name'] as String?)?.trim() ?? '';
+      if (name.isNotEmpty) {
+        debugPrint('[VAYA] Cold Start: Saved session found. Auto-logging customer in.');
+        await ensureMinLoaderTime();
+        if (mounted) {
+          setState(() {
+            _customerData = saved;
+            _needsOnboarding = false;
+            _loading = false;
+          });
+        }
+        // Perform background sync to verify/refresh token & profile
+        _syncSessionInBackground();
+        return;
       }
-      // Perform background sync to verify/refresh token & profile
-      _syncSessionInBackground();
-      return;
     }
 
     // 2. If no local session, wait for Firebase Auth disk restoration
@@ -765,6 +803,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
       }
     }
 
+    // Whether we successfully determined the customer is NOT onboarded yet.
+    // Stays false on network errors — we never evict a valid local session
+    // just because the network request failed transiently.
+    bool shouldClearSession = false;
+
     try {
       final token = await user.getIdToken(true);
       if (token != null && token.isNotEmpty) {
@@ -778,34 +821,56 @@ class _AuthWrapperState extends State<AuthWrapper> {
           final data = json.decode(res.body);
           if (data['exists'] == true && data['customer'] != null) {
             final customer = data['customer'];
-            await CustomerSessionManager.saveSession(customer, token: token);
-            await ensureMinLoaderTime();
-            if (mounted) {
-              setState(() {
-                _customerData = customer;
-                _loading = false;
-              });
+            final name = (customer['name'] as String?)?.trim() ?? '';
+            if (name.isNotEmpty) {
+              await CustomerSessionManager.saveSession(customer, token: token);
+              await ensureMinLoaderTime();
+              if (mounted) {
+                setState(() {
+                  _customerData = customer;
+                  _needsOnboarding = false;
+                  _loading = false;
+                });
+              }
+              return;
             }
-            return;
           }
+          // 200 OK but no valid profile — new / un-onboarded user, safe to clear.
+          shouldClearSession = true;
+        } else if (res.statusCode == 401 || res.statusCode == 403) {
+          // Expired/revoked token — safe to evict session.
+          shouldClearSession = true;
         }
+        // Any other HTTP status (5xx, timeouts that returned a response, etc.)
+        // is treated as a transient server error; keep existing local session.
       }
     } catch (e) {
-      debugPrint('[VAYA] Error syncing session with user: $e');
+      // Network/timeout exception — do NOT clear the local session; the user may
+      // simply be offline. Log and fall through with shouldClearSession = false.
+      debugPrint('[VAYA] Transient error syncing session with user: $e');
     }
 
-    final defaultCustomer = {
-      'id': user.uid,
-      'name': 'Valued Customer',
-      'phone': user.phoneNumber ?? '',
-    };
-    await CustomerSessionManager.saveSession(defaultCustomer);
-    await ensureMinLoaderTime();
-    if (mounted) {
-      setState(() {
-        _customerData = defaultCustomer;
-        _loading = false;
-      });
+    if (shouldClearSession) {
+      await CustomerSessionManager.clearSession();
+      await ensureMinLoaderTime();
+      if (mounted) {
+        setState(() {
+          _customerData = null;
+          _needsOnboarding = true;
+          _loading = false;
+        });
+      }
+    } else {
+      // Network error: recover from whatever is already on disk.
+      final saved = await CustomerSessionManager.getSavedSession();
+      await ensureMinLoaderTime();
+      if (mounted) {
+        setState(() {
+          _customerData = saved; // null if truly nothing persisted
+          _needsOnboarding = saved == null;
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -866,6 +931,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     if (_customerData != null) {
       return const MainNavigationScreen();
+    }
+
+    if (_needsOnboarding) {
+      return const OnboardingScreen();
     }
 
     return LanguageSelectionScreen(
@@ -1204,46 +1273,36 @@ class _LoginScreenState extends State<LoginScreen> {
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (mounted) {
-          final customer = (data['exists'] == true && data['customer'] != null)
-              ? data['customer']
-              : {
-                  'id': user.uid,
-                  'name': 'Valued Customer',
-                  'phone': user.phoneNumber ?? '',
-                };
-          await CustomerSessionManager.saveSession(customer);
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
-            (route) => false,
-          );
+          if (data['exists'] == true && data['customer'] != null && (data['customer']['name'] as String?)?.trim().isNotEmpty == true) {
+            final customer = data['customer'];
+            await CustomerSessionManager.saveSession(customer);
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+              (route) => false,
+            );
+          } else {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+              (route) => false,
+            );
+          }
         }
       } else {
-        final fallbackCustomer = {
-          'id': user.uid,
-          'name': 'Valued Customer',
-          'phone': user.phoneNumber ?? '',
-        };
-        await CustomerSessionManager.saveSession(fallbackCustomer);
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+            MaterialPageRoute(builder: (_) => const OnboardingScreen()),
             (route) => false,
           );
         }
       }
     } catch (e) {
-      final fallbackCustomer = {
-        'id': user.uid,
-        'name': 'Valued Customer',
-        'phone': user.phoneNumber ?? '',
-      };
-      await CustomerSessionManager.saveSession(fallbackCustomer);
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
           (route) => false,
         );
       }
@@ -2730,6 +2789,13 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
     _dropoffPos = widget.initialDropoffPos;
     _dropoffAddress = widget.initialDropoffAddress;
 
+    final initialQuery = _activeStep == 'pickup' ? _pickupAddress : (_activeStep == 'dropoff' ? _dropoffAddress : '');
+    if (initialQuery.isNotEmpty) {
+      _queryController.text = initialQuery;
+      _queryController.selection = TextSelection.collapsed(offset: initialQuery.length);
+      _onQueryChanged(initialQuery);
+    }
+
     _loadSearchStorage();
     if (_pickupAddress.isNotEmpty && _dropoffAddress.isNotEmpty) {
       _fetchRoadRoute();
@@ -2920,7 +2986,8 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
   }
 
   Future<Map<String, dynamic>?> _geocodeAddress(String address) async {
-    final url = 'https://maps.googleapis.com/maps/api/geocode/json?address=${Uri.encodeComponent(address)}&key=$googleMapsApiKey';
+    final targetAddress = address.toLowerCase().contains('bhubaneswar') ? address : '$address, Bhubaneswar';
+    final url = 'https://maps.googleapis.com/maps/api/geocode/json?address=${Uri.encodeComponent(targetAddress)}&key=$googleMapsApiKey';
     try {
       final res = await http.get(
         Uri.parse(url),
@@ -2986,7 +3053,8 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
 
   void _onQueryChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    final q = query.trim();
+    final String cleanQuery = query.replaceAll(RegExp(r'^Current location\s*[\·\-\|]?\s*', caseSensitive: false), '').trim();
+    final q = cleanQuery.isEmpty ? query.trim() : cleanQuery;
     if (q.length < 2) {
       setState(() {
         _predictions.clear();
@@ -3006,10 +3074,19 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
 
       try {
         List<Map<String, dynamic>> rawResults = [];
-        final double swLat = userLat - 0.25;
-        final double swLng = userLng - 0.25;
-        final double neLat = userLat + 0.25;
-        final double neLng = userLng + 0.25;
+
+        // Center on Bhubaneswar (20.2961, 85.8245) or user location if near BBSR
+        final bool isNearBbsr = userLat > 19.5 && userLat < 21.0 && userLng > 85.0 && userLng < 86.5;
+        final double refLat = isNearBbsr ? userLat : 20.2961;
+        final double refLng = isNearBbsr ? userLng : 85.8245;
+
+        final double swLat = refLat - 0.25;
+        final double swLng = refLng - 0.25;
+        final double neLat = refLat + 0.25;
+        final double neLng = refLng + 0.25;
+
+        // Append Bhubaneswar if not present in query for localized results
+        final String localizedQuery = q.toLowerCase().contains('bhubaneswar') ? q : '$q, Bhubaneswar';
 
         final headers = {
           'X-Android-Package': 'com.vaya.customer_app',
@@ -3019,7 +3096,7 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
         // 1. Google Geocoding API
         try {
           final googleUrl = 'https://maps.googleapis.com/maps/api/geocode/json?'
-              'address=${Uri.encodeComponent(q)}'
+              'address=${Uri.encodeComponent(localizedQuery)}'
               '&bounds=$swLat,$swLng|$neLat,$neLng'
               '&components=country:IN'
               '&key=$googleMapsApiKey';
@@ -3044,7 +3121,7 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
 
         // 2. Photon API
         try {
-          final photonUrl = 'https://photon.komoot.io/api/?q=${Uri.encodeComponent(q)}&lat=$userLat&lon=$userLng&limit=15';
+          final photonUrl = 'https://photon.komoot.io/api/?q=${Uri.encodeComponent(localizedQuery)}&lat=$refLat&lon=$refLng&limit=15';
           final res = await http.get(Uri.parse(photonUrl)).timeout(const Duration(seconds: 4));
           if (res.statusCode == 200) {
             final data = json.decode(res.body);
@@ -3062,9 +3139,9 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
           }
         } catch (_) {}
 
-        // 3. Nominatim API
+        // 3. Nominatim API with bounded=1
         try {
-          final nomUrl = 'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${Uri.encodeComponent(q)}&viewbox=$swLng,$swLat,$neLng,$neLat&limit=10';
+          final nomUrl = 'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${Uri.encodeComponent(localizedQuery)}&viewbox=$swLng,$swLat,$neLng,$neLat&bounded=1&limit=10';
           final nomRes = await http.get(
             Uri.parse(nomUrl),
             headers: {'User-Agent': 'VAYACustomerApp/1.0', 'Accept-Language': 'en'},
@@ -3082,16 +3159,39 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
           }
         } catch (_) {}
 
-        // Deduplicate and distance-sort
+        // Deduplicate and distance-sort with Bhubaneswar localization filter (~45km radius)
+        const double bbsrCenterLat = 20.2961;
+        const double bbsrCenterLng = 85.8245;
+
         List<Map<String, dynamic>> uniqueResults = [];
         for (var item in rawResults) {
           final itemLat = item['lat'] as double;
           final itemLon = item['lon'] as double;
+
+          // Filter out results outside ~45km of Bhubaneswar
+          final distFromBbsr = Geolocator.distanceBetween(bbsrCenterLat, bbsrCenterLng, itemLat, itemLon);
+          if (distFromBbsr > 45000) {
+            continue;
+          }
+
           bool isDuplicate = uniqueResults.any((e) => Geolocator.distanceBetween(itemLat, itemLon, e['lat'], e['lon']) < 250);
           if (!isDuplicate) {
             uniqueResults.add({...item, 'distance': Geolocator.distanceBetween(userLat, userLng, itemLat, itemLon)});
           }
         }
+
+        // Fallback to all rawResults if the 45km filter produced no matches
+        if (uniqueResults.isEmpty && rawResults.isNotEmpty) {
+          for (var item in rawResults) {
+            final itemLat = item['lat'] as double;
+            final itemLon = item['lon'] as double;
+            bool isDuplicate = uniqueResults.any((e) => Geolocator.distanceBetween(itemLat, itemLon, e['lat'], e['lon']) < 250);
+            if (!isDuplicate) {
+              uniqueResults.add({...item, 'distance': Geolocator.distanceBetween(userLat, userLng, itemLat, itemLon)});
+            }
+          }
+        }
+
         uniqueResults.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
 
         if (mounted) {
@@ -3289,7 +3389,7 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
     final isPickupConfirmed = _pickupAddress.isNotEmpty;
     final isDropoffConfirmed = _dropoffAddress.isNotEmpty;
     final bool bothConfirmed = isPickupConfirmed && isDropoffConfirmed;
-    final bool showResultsPanel = !bothConfirmed || _queryController.text.isNotEmpty || _searching || _predictions.isNotEmpty;
+    final bool showResultsPanel = isPickupActive || isDropoffActive || !bothConfirmed || _queryController.text.isNotEmpty || _searching || _predictions.isNotEmpty;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -3326,6 +3426,9 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
                       _queryController.selection = TextSelection.collapsed(offset: _queryController.text.length);
                       _predictions.clear();
                     });
+                    if (_pickupAddress.isNotEmpty) {
+                      _onQueryChanged(_pickupAddress);
+                    }
                   }
                 },
                 borderRadius: BorderRadius.circular(14),
@@ -3455,6 +3558,9 @@ class _SinglePageTripPlannerState extends State<SinglePageTripPlanner> {
                       _queryController.selection = TextSelection.collapsed(offset: _queryController.text.length);
                       _predictions.clear();
                     });
+                    if (_dropoffAddress.isNotEmpty) {
+                      _onQueryChanged(_dropoffAddress);
+                    }
                   }
                 },
                 borderRadius: BorderRadius.circular(14),
@@ -4021,6 +4127,8 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
     _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
   }
 
+
+
   double _calculatePrice(String vehicleId) {
     final dist = _roadDistanceKm > 0 ? _roadDistanceKm : (Geolocator.distanceBetween(widget.pickup.latitude, widget.pickup.longitude, widget.dropoff.latitude, widget.dropoff.longitude) / 1000.0);
 
@@ -4035,7 +4143,9 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           final double basePrice = double.parse(match['base_price'].toString());
           final double baseDistance = double.parse(match['base_distance'].toString());
           final double perKmPrice = double.parse(match['per_km_price'].toString());
-          baseCost = basePrice + (dist > baseDistance ? (dist - baseDistance) * perKmPrice : 0.0);
+          final double defaultPerKm = (vehicleId == 'bike' ? 10.0 : vehicleId == 'three_wheeler' ? 18.0 : vehicleId == 'ace' ? 25.0 : 35.0);
+          final double validPerKm = perKmPrice > 0 ? perKmPrice : defaultPerKm;
+          baseCost = basePrice + (dist > baseDistance ? (dist - baseDistance) * validPerKm : 0.0);
         }
       } catch (e) {
         debugPrint("Error parsing pricing: $e");
@@ -4057,10 +4167,9 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
       }
     }
 
-    final helperFee = _helperCount * 150.0;
-    final taxes = baseCost * 0.05;
-    final platformFee = 10.0;
-    final total = baseCost + helperFee + taxes + platformFee - _discount;
+    final helperFee = (vehicleId == 'bike') ? 0.0 : (_helperCount * 150.0);
+    final taxes = double.parse(((baseCost + helperFee) * 0.05).toStringAsFixed(2));
+    final total = baseCost + helperFee + taxes - _discount;
     return total > 0 ? total : 0.0;
   }
 
@@ -4350,6 +4459,8 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
       }
     }
 
+    final bool isBikeUnavailable = _roadDistanceKm > 50.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -4378,10 +4489,9 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Compact 72–88 px route summary ──
+              // ── Compact route summary ──
               Container(
-                height: 76,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
@@ -4467,7 +4577,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -4509,8 +4619,8 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                   eta: '3 mins away',
                   imageAsset: 'assets/images/vehicle_bike.png',
                   cargoExamples: 'Documents, food, small packets',
+                  unavailable: isBikeUnavailable,
                 ),
-                const SizedBox(height: 8),
                 _buildVehicleOption(
                   id: 'three_wheeler',
                   name: '3-wheeler',
@@ -4520,7 +4630,6 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                   imageAsset: 'assets/images/vehicle_3wheeler.png',
                   cargoExamples: 'Medium boxes, crates, retail supplies',
                 ),
-                const SizedBox(height: 8),
                 _buildVehicleOption(
                   id: 'ace',
                   name: 'Mini truck',
@@ -4530,7 +4639,6 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                   imageAsset: 'assets/images/vehicle_mini_truck.png',
                   cargoExamples: 'Appliances, furniture, business inventory',
                 ),
-                const SizedBox(height: 8),
                 _buildVehicleOption(
                   id: 'truck',
                   name: 'Light commercial vehicle',
@@ -4542,104 +4650,109 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                 ),
               ],
 
-              const SizedBox(height: 18),
-              const Text(
-                'TRIP CUSTOMIZATION',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2, color: VayaTheme.slate, fontFamily: 'Inter'),
-              ),
-              const SizedBox(height: 8),
-
-              // Goods Category Dropdown (required)
-              DropdownButtonFormField<String>(
-                value: _goodsCategory,
-                decoration: InputDecoration(
-                  labelText: 'Goods Category *',
-                  labelStyle: const TextStyle(fontSize: 13, fontFamily: 'Inter'),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: VayaTheme.fog.withOpacity(0.8)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: VayaTheme.saffron, width: 1.5),
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                ),
-                style: const TextStyle(fontSize: 14, fontFamily: 'Inter', color: VayaTheme.inkBlack),
-                items: const [
-                  DropdownMenuItem(value: 'General Cargo', child: Text('General Packages & Boxes')),
-                  DropdownMenuItem(value: 'Electronics', child: Text('Electronics & Appliances')),
-                  DropdownMenuItem(value: 'Furniture', child: Text('Furniture & Home Goods')),
-                  DropdownMenuItem(value: 'FMCG', child: Text('Groceries / FMCG Products')),
-                  DropdownMenuItem(value: 'Hardware', child: Text('Hardware / Construction Goods')),
-                  DropdownMenuItem(value: 'Fragile', child: Text('Fragile / Glassware')),
-                ],
-                onChanged: (val) => setState(() => _goodsCategory = val!),
-              ),
-              const SizedBox(height: 6),
-              // Category Restrictions Notice
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade50,
-                  border: Border.all(color: Colors.amber.shade200),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, size: 14, color: Colors.amber.shade800),
-                    const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text(
-                        'Restrictions: Fragile items require protective packaging. Prohibited items, hazardous materials, and chemicals are not permitted.',
-                        style: TextStyle(fontSize: 11, color: VayaTheme.slate, fontFamily: 'Inter'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              // Helper / Loading Assistance — hidden for Bike
-              if (_selectedVehicle != 'bike') ...[
+              // Trip Customization section — shown fully below vehicle list only after a vehicle is selected
+              if (_selectedVehicle.isNotEmpty) ...[
+                const SizedBox(height: 18),
                 const Text(
-                  'Helper / Loading Assistance',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack, fontFamily: 'General Sans'),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  'Helper supports loading and unloading; driver assistance is not included.',
-                  style: TextStyle(fontSize: 12, color: VayaTheme.slate, fontFamily: 'Inter'),
+                  'TRIP CUSTOMIZATION',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2, color: VayaTheme.slate, fontFamily: 'Inter'),
                 ),
                 const SizedBox(height: 8),
-                Column(
-                  children: [
-                    _buildHelperOptionTile(
-                      title: 'No Helper',
-                      subtitle: 'You will handle all loading and unloading.',
-                      value: 0,
-                      priceSuffix: '',
+
+                // Goods Category Dropdown
+                DropdownButtonFormField<String>(
+                  value: _goodsCategory,
+                  decoration: InputDecoration(
+                    labelText: 'Goods Category *',
+                    labelStyle: const TextStyle(fontSize: 13, fontFamily: 'Inter'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: VayaTheme.fog.withOpacity(0.8)),
                     ),
-                    _buildHelperOptionTile(
-                      title: '1 Helper',
-                      subtitle: '1 helper assists with loading/unloading.',
-                      value: 1,
-                      priceSuffix: '+₹150',
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: VayaTheme.saffron, width: 1.5),
                     ),
-                    _buildHelperOptionTile(
-                      title: '2 Helpers',
-                      subtitle: '2 helpers assist with loading/unloading.',
-                      value: 2,
-                      priceSuffix: '+₹300',
-                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  style: const TextStyle(fontSize: 14, fontFamily: 'Inter', color: VayaTheme.inkBlack),
+                  items: const [
+                    DropdownMenuItem(value: 'General Cargo', child: Text('General Packages & Boxes')),
+                    DropdownMenuItem(value: 'Electronics', child: Text('Electronics & Appliances')),
+                    DropdownMenuItem(value: 'Furniture', child: Text('Furniture & Home Goods')),
+                    DropdownMenuItem(value: 'FMCG', child: Text('Groceries / FMCG Products')),
+                    DropdownMenuItem(value: 'Hardware', child: Text('Hardware / Construction Goods')),
+                    DropdownMenuItem(value: 'Fragile', child: Text('Fragile / Glassware')),
                   ],
+                  onChanged: (val) {
+                    if (val != null) setState(() => _goodsCategory = val);
+                  },
                 ),
+                const SizedBox(height: 6),
+                // Category Restrictions Notice
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    border: Border.all(color: Colors.amber.shade200),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, size: 14, color: Colors.amber.shade800),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'Restrictions: Fragile items require protective packaging. Prohibited items, hazardous materials, and chemicals are not permitted.',
+                          style: TextStyle(fontSize: 11, color: VayaTheme.slate, fontFamily: 'Inter'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Helper / Loading Assistance — hidden for Bike
+                if (_selectedVehicle != 'bike') ...[
+                  const Text(
+                    'Helper / Loading Assistance',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaTheme.inkBlack, fontFamily: 'General Sans'),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Helper supports loading and unloading; driver assistance is not included.',
+                    style: TextStyle(fontSize: 12, color: VayaTheme.slate, fontFamily: 'Inter'),
+                  ),
+                  const SizedBox(height: 8),
+                  Column(
+                    children: [
+                      _buildHelperOptionTile(
+                        title: 'No Helper',
+                        subtitle: 'You will handle all loading and unloading.',
+                        value: 0,
+                        priceSuffix: '',
+                      ),
+                      _buildHelperOptionTile(
+                        title: '1 Helper',
+                        subtitle: '1 helper assists with loading/unloading.',
+                        value: 1,
+                        priceSuffix: '+₹150',
+                      ),
+                      _buildHelperOptionTile(
+                        title: '2 Helpers',
+                        subtitle: '2 helpers assist with loading/unloading.',
+                        value: 2,
+                        priceSuffix: '+₹300',
+                      ),
+                    ],
+                  ),
+                ],
               ],
-              const SizedBox(height: 96), // Bottom padding so last vehicle row clears the sticky CTA
+              SizedBox(height: 80 + MediaQuery.of(context).padding.bottom),
             ],
           ),
         ),
@@ -4674,7 +4787,7 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
                     : Text(
                         dist < 0.05
                             ? 'Select a valid route first'
-                            : 'Continue · ${_selectedVehicle == 'bike' ? 'Bike' : _selectedVehicle == 'three_wheeler' ? '3-Wheeler' : _selectedVehicle == 'ace' ? 'Mini Truck' : 'LCV'} · ₹${estFare.toStringAsFixed(0)}',
+                            : 'Continue · ${_selectedVehicle == 'bike' ? 'Bike' : _selectedVehicle == 'three_wheeler' ? '3-Wheeler' : _selectedVehicle == 'ace' ? 'Mini Truck' : 'LCV'} · ${formatIndianCurrency(estFare)}',
                         style: const TextStyle(
                           fontFamily: 'General Sans',
                           fontWeight: FontWeight.w600,
@@ -4712,113 +4825,141 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
     final etaText = 'Arrives in $cleanEta';
 
     return Opacity(
-      opacity: unavailable ? 0.45 : 1.0,
-      child: InkWell(
-        onTap: unavailable ? null : () => setState(() {
-          _selectedVehicle = id;
-          // Reset helper count when switching to Bike
-          if (id == 'bike') _helperCount = 0;
-        }),
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          height: 124,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
-              width: isSelected ? 1.5 : 1.0,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            color: isSelected ? VayaTheme.saffron.withOpacity(0.04) : Colors.white,
+      opacity: unavailable ? 0.5 : 1.0,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: isSelected ? VayaTheme.saffron : VayaTheme.fog,
+            width: isSelected ? 1.5 : 1.0,
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Radio indicator
-              Radio<String>(
-                value: id,
-                groupValue: unavailable ? null : _selectedVehicle,
-                activeColor: VayaTheme.saffron,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-                onChanged: unavailable ? null : (val) {
-                  if (val != null) setState(() {
-                    _selectedVehicle = val;
-                    if (val == 'bike') _helperCount = 0;
-                  });
-                },
-              ),
-              const SizedBox(width: 4),
-              // Vehicle icon
-              SizedBox(
-                width: 46,
-                height: 46,
-                child: Image.asset(
-                  imageAsset,
-                  fit: BoxFit.contain,
+          borderRadius: BorderRadius.circular(14),
+          color: isSelected ? VayaTheme.saffron.withOpacity(0.04) : Colors.white,
+        ),
+        child: InkWell(
+          onTap: unavailable
+              ? null
+              : () => setState(() {
+                    _selectedVehicle = id;
+                    if (id == 'bike') _helperCount = 0;
+                  }),
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Radio indicator
+                Radio<String>(
+                  value: id,
+                  groupValue: unavailable ? null : _selectedVehicle,
+                  activeColor: VayaTheme.saffron,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  onChanged: unavailable
+                      ? null
+                      : (val) {
+                          if (val != null) {
+                            setState(() {
+                              _selectedVehicle = val;
+                              if (val == 'bike') _helperCount = 0;
+                            });
+                          }
+                        },
                 ),
-              ),
-              const SizedBox(width: 10),
-              // Vehicle details
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(width: 4),
+                // Fixed image space
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Image.asset(
+                    imageAsset,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Flexible details column
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: VayaTheme.inkBlack,
+                          fontFamily: 'General Sans',
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$capacity · $dimensions',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: VayaTheme.slate,
+                          fontWeight: FontWeight.w500,
+                          fontFamily: 'Inter',
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Best for: $cargoExamples',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: VayaTheme.slate,
+                          fontFamily: 'Inter',
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (unavailable) ...[
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Unavailable for long distance (>50 km)',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFFDC2626),
+                            fontWeight: FontWeight.w500,
+                            fontFamily: 'Inter',
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Right-aligned fare & ETA column
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: VayaTheme.inkBlack,
+                      formatIndianCurrency(fare),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
                         fontFamily: 'General Sans',
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '$capacity · $dimensions',
-                      style: const TextStyle(fontSize: 11.5, color: VayaTheme.slate, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                     const SizedBox(height: 3),
                     Text(
-                      'Best for: $cargoExamples',
-                      style: const TextStyle(fontSize: 11, color: VayaTheme.slate, fontFamily: 'Inter'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (unavailable)
-                      const Text(
-                        'Unavailable on this route',
-                        style: TextStyle(fontSize: 10, color: Color(0xFFDC2626), fontFamily: 'Inter'),
+                      etaText,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: VayaTheme.slate,
+                        fontWeight: FontWeight.w500,
+                        fontFamily: 'Inter',
                       ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              // Fare & ETA
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '₹${fare.toStringAsFixed(0)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 17,
-                      color: isSelected ? VayaTheme.saffron : VayaTheme.inkBlack,
-                      fontFamily: 'General Sans',
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    etaText,
-                    style: const TextStyle(fontSize: 10.5, color: VayaTheme.slate, fontWeight: FontWeight.w500, fontFamily: 'Inter'),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -4827,41 +4968,42 @@ class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
 
   Widget _buildVehicleSkeletonRow() {
     return Container(
-      height: 124,
-      margin: const EdgeInsets.only(bottom: 0),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: VayaTheme.fog),
       ),
       child: Row(
         children: [
-          const SizedBox(width: 16),
-          _skeletonBox(40, 40, radius: 8),
-          const SizedBox(width: 12),
+          _skeletonBox(20, 20, radius: 10),
+          const SizedBox(width: 8),
+          _skeletonBox(44, 44, radius: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _skeletonBox(12, 120),
+                _skeletonBox(14, 110),
                 const SizedBox(height: 6),
                 _skeletonBox(10, 90),
                 const SizedBox(height: 6),
-                _skeletonBox(10, 140),
+                _skeletonBox(10, 130),
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _skeletonBox(20, 52),
+              _skeletonBox(18, 56),
               const SizedBox(height: 4),
-              _skeletonBox(11, 60),
+              _skeletonBox(10, 64),
             ],
           ),
-          const SizedBox(width: 16),
         ],
       ),
     );
@@ -6056,12 +6198,32 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
     return 2.0;
   }
 
+  double get _perKmRate {
+    if (_serverPricing.isNotEmpty) {
+      try {
+        final match = _serverPricing.firstWhere(
+          (p) => p['vehicle_type'] == widget.selectedVehicle,
+          orElse: () => null,
+        );
+        if (match != null && match['per_km_price'] != null) {
+          final double rate = double.parse(match['per_km_price'].toString());
+          if (rate > 0) return rate;
+        }
+      } catch (_) {}
+    }
+    switch (widget.selectedVehicle) {
+      case 'bike': return 10.0;
+      case 'three_wheeler': return 18.0;
+      case 'ace': return 25.0;
+      default: return 35.0;
+    }
+  }
+
   double get _totalFare {
-    final baseFare = _baseFare;
+    final baseFare = double.parse(_baseFare.toStringAsFixed(2));
     final helperFee = widget.helperCount * 150.0;
-    final taxes = baseFare * 0.05;
-    const platformFee = 10.0;
-    final total = baseFare + helperFee + taxes + platformFee;
+    final taxes = double.parse(((baseFare + helperFee) * 0.05).toStringAsFixed(2));
+    final total = baseFare + helperFee + taxes;
     return total > 0 ? total : 0.0;
   }
 
@@ -6140,12 +6302,10 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
           'goodsCategory': widget.goodsCategory,
           'helpers': widget.helperCount,
           'paymentMethod': paymentType == 'cash'
-              ? (_cashCollectionPoint == 'PICKUP'
-                  ? 'Cash · Collect at pickup'
-                  : 'Cash · Collect at drop-off')
+              ? 'Cash on delivery'
               : (paymentType == 'wallet' ? 'VAYA Wallet' : 'UPI Payment'),
           'paymentType': paymentType,
-          'cashCollectionPoint': paymentType == 'cash' ? _cashCollectionPoint : null,
+          'cashCollectionPoint': paymentType == 'cash' ? 'DROPOFF' : null,
           'razorpayPaymentId': razorpayPaymentId,
         }),
       ).timeout(const Duration(seconds: 30));
@@ -6206,6 +6366,56 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
     );
   }
 
+  Widget _buildDetailedInfoRow({
+    required String title,
+    required String subtitle,
+    required String amount,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: VayaTheme.slate,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: VayaTheme.slate,
+                      fontFamily: 'Inter',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Text(
+            amount,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: VayaTheme.inkBlack,
+              fontFamily: 'Inter',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDivider() => Divider(height: 1, color: VayaTheme.fog.withOpacity(0.7));
 
   Widget _buildCard({required Widget child, EdgeInsets? padding}) {
@@ -6223,11 +6433,10 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final baseFare = _baseFare;
+    final baseFare = double.parse(_baseFare.toStringAsFixed(2));
     final helperFee = widget.helperCount * 150.0;
-    final taxes = baseFare * 0.05;
-    const platformFee = 10.0;
-    final total = baseFare + helperFee + taxes + platformFee;
+    final taxes = double.parse(((baseFare + helperFee) * 0.05).toStringAsFixed(2));
+    final total = double.parse((baseFare + helperFee + taxes).toStringAsFixed(2));
 
     return Scaffold(
       backgroundColor: VayaTheme.signalCream,
@@ -6419,19 +6628,27 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                 children: [
                   const Text('Fare breakdown', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w600, fontSize: 15, color: VayaTheme.inkBlack)),
                   const SizedBox(height: 12),
-                  _buildInfoRow('Base transport fare', '₹${baseFare.toStringAsFixed(2)}'),
-                  if (widget.helperCount > 0) _buildInfoRow('Helper fee (${widget.helperCount}×₹150)', '₹${helperFee.toStringAsFixed(2)}'),
-                  _buildInfoRow('GST (5%)', '₹${taxes.toStringAsFixed(2)}'),
-                  _buildInfoRow('Platform fee', '₹${platformFee.toStringAsFixed(2)}'),
+                  _buildDetailedInfoRow(
+                    title: 'Base transport fare',
+                    subtitle: '₹${_perKmRate % 1 == 0 ? _perKmRate.toInt() : _perKmRate.toStringAsFixed(1)}/km × ${widget.distanceKm.toStringAsFixed(1)} km',
+                    amount: formatCurrencyTwoDecimals(baseFare),
+                  ),
+                  if (widget.helperCount > 0)
+                    _buildDetailedInfoRow(
+                      title: 'Helper charge',
+                      subtitle: '${widget.helperCount} ${widget.helperCount == 1 ? 'helper' : 'helpers'}',
+                      amount: formatCurrencyTwoDecimals(helperFee),
+                    ),
+                  _buildInfoRow('GST (5%)', formatCurrencyTwoDecimals(taxes)),
                   const SizedBox(height: 6),
                   _buildDivider(),
                   const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Total (estimated)', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w700, fontSize: 16, color: VayaTheme.inkBlack)),
+                      const Text('Total estimated', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w700, fontSize: 16, color: VayaTheme.inkBlack)),
                       Text(
-                        '₹${total.toStringAsFixed(0)}',
+                        formatCurrencyTwoDecimals(total),
                         style: const TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w700, fontSize: 18, color: VayaTheme.saffron),
                       ),
                     ],
@@ -6502,6 +6719,29 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                       ),
                     ],
                   ),
+                  if (_selectedPayment == 'UPI' || _selectedPayment == 'Wallet') ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Color(0xFF2563EB), size: 18),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Any extra waiting time charges will be taken at the end of the trip as cash payment to the driver.',
+                              style: TextStyle(fontSize: 11.5, color: Color(0xFF1E40AF), fontWeight: FontWeight.w500, fontFamily: 'Inter'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (_selectedPayment == 'Wallet' && _walletBalance < _totalFare) ...[
                     const SizedBox(height: 10),
                     Container(
@@ -6528,40 +6768,6 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                 ],
               ),
             ),
-
-            // ── Cash collection point choice (REQUIRED when Cash selected) ──────────
-            if (_selectedPayment == 'Cash') ...[
-              const SizedBox(height: 12),
-              _buildCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Text(
-                          'Where should the driver collect cash?',
-                          style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w600, fontSize: 15, color: VayaTheme.inkBlack),
-                        ),
-                        const SizedBox(width: 4),
-                        Text('*', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.w700, fontSize: 15, color: Colors.red.shade700)),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildCashCollectionCard(
-                      title: 'At pickup',
-                      subtitle: 'Sender pays before the delivery starts',
-                      value: 'PICKUP',
-                    ),
-                    const SizedBox(height: 10),
-                    _buildCashCollectionCard(
-                      title: 'At drop-off',
-                      subtitle: 'Receiver pays before handover',
-                      value: 'DROPOFF',
-                    ),
-                  ],
-                ),
-              ),
-            ],
 
             const SizedBox(height: 12),
 
@@ -6629,7 +6835,6 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
               child: ElevatedButton(
                 onPressed: (!_isBooking &&
                         _selectedPayment.isNotEmpty &&
-                        (_selectedPayment != 'Cash' || _cashCollectionPoint != null) &&
                         (_selectedPayment != 'Wallet' || _walletBalance >= _totalFare))
                     ? _confirmBooking
                     : null,
@@ -6647,11 +6852,9 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                     : Text(
                         _selectedPayment.isEmpty
                             ? 'Select payment method'
-                            : ((_selectedPayment == 'Cash' && _cashCollectionPoint == null)
-                                ? 'Select cash collection point'
-                                : ((_selectedPayment == 'Wallet' && _walletBalance < _totalFare)
-                                    ? 'Insufficient wallet balance'
-                                    : 'Book VAYA')),
+                            : ((_selectedPayment == 'Wallet' && _walletBalance < _totalFare)
+                                ? 'Insufficient wallet balance'
+                                : 'Book VAYA'),
                         style: const TextStyle(
                           fontFamily: 'General Sans',
                           fontWeight: FontWeight.w700,
@@ -6825,8 +7028,8 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
   }
 }
 
-/// Driver Rating Modal Bottom Sheet
-class DriverRatingBottomSheet extends StatefulWidget {
+/// Partner Rating Modal Bottom Sheet
+class PartnerRatingBottomSheet extends StatefulWidget {
   final String bookingId;
   final String driverName;
   final Map<String, dynamic>? bookingData;
@@ -6848,7 +7051,7 @@ class DriverRatingBottomSheet extends StatefulWidget {
   static void markRatingDismissed(String bookingId) =>
       _activeRatingBookingIds.remove(bookingId);
 
-  const DriverRatingBottomSheet({
+  const PartnerRatingBottomSheet({
     super.key,
     required this.bookingId,
     required this.driverName,
@@ -6857,10 +7060,12 @@ class DriverRatingBottomSheet extends StatefulWidget {
   });
 
   @override
-  State<DriverRatingBottomSheet> createState() => _DriverRatingBottomSheetState();
+  State<PartnerRatingBottomSheet> createState() => _PartnerRatingBottomSheetState();
 }
 
-class _DriverRatingBottomSheetState extends State<DriverRatingBottomSheet> with SingleTickerProviderStateMixin {
+typedef DriverRatingBottomSheet = PartnerRatingBottomSheet;
+
+class _PartnerRatingBottomSheetState extends State<PartnerRatingBottomSheet> with SingleTickerProviderStateMixin {
   int _rating = 0; // Starts unselected (0 stars)
   int _pressedStar = 0;
   final Set<String> _selectedIssues = {};
@@ -7541,6 +7746,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   String _otp = "";
   double _estimatedCost = 0.0;
   String _vehicleType = "bike";
+  String _paymentType = "cash";
+  String _paymentMethod = "Cash on delivery";
   bool _isCancelling = false;
   bool _isOffline = false;
   bool _noDriversAvailable = false;
@@ -7613,9 +7820,11 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
     final pickup = _pickupAddress.isEmpty ? 'Pickup Location' : _pickupAddress;
     final dropoff = _dropoffAddress.isEmpty ? 'Drop-off Location' : _dropoffAddress;
     final fareStr = _estimatedCost.toStringAsFixed(0);
-    final paymentInfo = _cashCollectionPoint == 'DROPOFF'
-        ? 'Cash at Drop-off (₹$fareStr - Receiver to pay)'
-        : (_cashCollectionPoint == 'PICKUP' ? 'Paid at Pickup (₹$fareStr)' : '₹$fareStr (Cash on Delivery)');
+    final paymentInfo = (_paymentType == 'online' || _paymentType == 'upi' || _paymentMethod.contains('UPI'))
+        ? 'Paid via UPI (₹$fareStr)'
+        : ((_paymentType == 'wallet' || _paymentMethod.contains('Wallet'))
+            ? 'Paid via Wallet (₹$fareStr)'
+            : 'Cash on Delivery (₹$fareStr)');
 
     final shareText = '''
 📦 VAYA Goods Delivery - Order & Drop-off OTP
@@ -7877,6 +8086,12 @@ Track live on VAYA Customer App!
               _estimatedCost = cost;
             }
             _vehicleType = booking['vehicle_type'] ?? _vehicleType;
+            if (booking['payment_type'] != null || booking['paymentType'] != null) {
+              _paymentType = (booking['payment_type'] ?? booking['paymentType']).toString().toLowerCase();
+            }
+            if (booking['payment_method'] != null || booking['paymentMethod'] != null) {
+              _paymentMethod = (booking['payment_method'] ?? booking['paymentMethod']).toString();
+            }
             if (booking['pickup_lat'] != null && booking['pickup_lng'] != null) {
               _pickupPos = LatLng(double.parse(booking['pickup_lat'].toString()), double.parse(booking['pickup_lng'].toString()));
             }
@@ -9071,13 +9286,14 @@ Track live on VAYA Customer App!
                         children: [
                           IconButton(
                             icon: const Icon(Icons.call, color: VayaTheme.routeGreen, size: 20),
-                            tooltip: 'Call Driver (Masked)',
+                            // L1-fix: removed 'Masked' — no masking proxy exists.
+                            tooltip: 'Call Driver',
                             onPressed: () {
                               final targetPhone = _driverPhone.trim();
                               if (targetPhone.isNotEmpty) {
                                 _makePhoneCall(targetPhone);
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Connecting masked call to driver $formattedDriver...')),
+                                  SnackBar(content: Text('Calling driver $formattedDriver...')),
                                 );
                               } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -9086,15 +9302,7 @@ Track live on VAYA Customer App!
                               }
                             },
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.chat_bubble_outline, color: VayaTheme.saffron, size: 20),
-                            tooltip: 'Chat with Driver',
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Opening secure chat with $formattedDriver...')),
-                              );
-                            },
-                          ),
+                          // D11-fix: removed — no chat feature, screen, or endpoint exists.
                         ],
                       ),
                     ],
@@ -9103,7 +9311,7 @@ Track live on VAYA Customer App!
 
                 const SizedBox(height: 10),
 
-                // Cash Collection Point Info & Edit Card
+                // Payment Method Card
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
@@ -9127,61 +9335,32 @@ Track live on VAYA Customer App!
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'Payment & Cash Collection',
+                              'Payment Method',
                               style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: VayaTheme.slate, fontFamily: 'Inter'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              _cashCollectionPoint == 'PICKUP'
-                                  ? 'Cash · Collect at pickup (Sender pays)'
-                                  : (_cashCollectionPoint == 'DROPOFF'
-                                      ? 'Cash · Collect at drop-off (Receiver pays)'
+                              (_paymentType == 'online' || _paymentType == 'upi' || _paymentMethod.contains('UPI'))
+                                  ? 'UPI Payment'
+                                  : ((_paymentType == 'wallet' || _paymentMethod.contains('Wallet'))
+                                      ? 'VAYA Wallet'
                                       : 'Cash on delivery'),
                               style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack, fontFamily: 'General Sans'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
+                            if (_paymentType == 'online' || _paymentType == 'upi' || _paymentType == 'wallet' || _paymentMethod.contains('UPI') || _paymentMethod.contains('Wallet')) ...[
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Note: Any extra waiting time charges will be taken at the end of the trip as cash payment to the driver.',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF2563EB), fontWeight: FontWeight.w500, fontFamily: 'Inter'),
+                              ),
+                            ],
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      if (_isSearchingState)
-                        InkWell(
-                          onTap: _openEditCashCollectionPointSheet,
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: VayaTheme.saffron.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Text(
-                              'Edit',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack, fontFamily: 'Inter'),
-                            ),
-                          ),
-                        )
-                      else
-                        Tooltip(
-                          message: 'Locked after driver assignment',
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: VayaTheme.fog.withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.lock_outline, size: 12, color: VayaTheme.slate),
-                                SizedBox(width: 4),
-                                Text('Locked', style: TextStyle(fontSize: 11, color: VayaTheme.slate, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -10736,7 +10915,7 @@ class DeliveryDetailsScreen extends StatelessWidget {
     final distFare = (fare * 0.38).toStringAsFixed(2);
     final gst = (fare * 0.07).toStringAsFixed(2);
     final displayId = _formatDisplayId(booking['id']);
-    bool isDownloading = false;
+    // D9-fix: isDownloading removed — no fake download any more.
 
     showModalBottomSheet(
       context: context,
@@ -10811,23 +10990,35 @@ class DeliveryDetailsScreen extends StatelessWidget {
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      onPressed: isDownloading
-                          ? null
-                          : () {
-                              setSheetState(() => isDownloading = true);
-                              Future.delayed(const Duration(milliseconds: 1200), () {
-                                if (context.mounted) {
-                                  Navigator.pop(ctx);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Tax invoice PDF saved to your downloads.')),
-                                  );
-                                }
-                              });
-                            },
-                      icon: isDownloading
-                          ? const VayaLoader.inline(size: 18, color: Colors.white)
-                          : const Icon(Icons.download_rounded, size: 18),
-                      label: Text(isDownloading ? 'Generating Invoice...' : 'Download PDF Invoice', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      // D9-fix: inlined HTTP call — _sendSupportTicket lives in a different class.
+                      onPressed: () async {
+                        try {
+                          final token = await CustomerAuthHelper.getAuthToken();
+                          if (token != null) {
+                            await http.post(
+                              Uri.parse('$apiBaseUrl/api/customer/support-ticket'),
+                              headers: {
+                                'Authorization': 'Bearer $token',
+                                'Content-Type': 'application/json',
+                              },
+                              body: json.encode({
+                                'type': 'invoice_request',
+                                'details': {'bookingId': booking['id']?.toString() ?? ''},
+                              }),
+                            ).timeout(const Duration(seconds: 8));
+                          }
+                        } catch (e) {
+                          debugPrint('Invoice request error: $e');
+                        }
+                        if (context.mounted) {
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Invoice request submitted — will be emailed within 24 hours.')),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.support_agent_rounded, size: 18),
+                      label: const Text('Request Invoice via Support', style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
@@ -10982,11 +11173,18 @@ class DeliveryDetailsScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              const Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Reason', style: TextStyle(fontSize: 12.5, color: VayaTheme.slate)),
-                  Text('Cancelled before pickup verification', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                  const Text('Reason', style: TextStyle(fontSize: 12.5, color: VayaTheme.slate)),
+                  // D7-fix: use real cancellation reason from booking record.
+                  Flexible(
+                    child: Text(
+                      booking['cancellation_reason']?.toString() ?? 'No reason provided',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.end,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -10994,24 +11192,40 @@ class DeliveryDetailsScreen extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Cancellation Fee', style: TextStyle(fontSize: 12.5, color: VayaTheme.slate)),
-                  const Text('₹0.00 (Waived)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: VayaTheme.routeGreen)),
+                  // D7-fix: use real fee if present, otherwise show 'Pending'.
+                  Text(
+                    booking['cancellation_fee'] != null
+                        ? '₹${double.tryParse(booking['cancellation_fee'].toString())?.toStringAsFixed(2) ?? booking['cancellation_fee']}'
+                        : 'Pending',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: booking['cancellation_fee'] != null ? VayaTheme.routeGreen : VayaTheme.slate,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Refund Amount', style: TextStyle(fontSize: 12.5, color: VayaTheme.slate)),
-                  Text('$fareStr (100% Refund)', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: VayaTheme.routeGreen)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Refund Settlement', style: TextStyle(fontSize: 12.5, color: VayaTheme.slate)),
-                  Text('Credited to VAYA Wallet on $dateStr', style: const TextStyle(fontSize: 11.5, color: VayaTheme.slate)),
-                ],
+              // D7-fix: removed hardcoded '100% Refund' rows — no refund code path exists.
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: VayaTheme.signalCream,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: VayaTheme.fog),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: VayaTheme.slate),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Refund processing: 5–7 business days (if applicable). Contact support for status.',
+                        style: TextStyle(fontSize: 11, color: VayaTheme.slate),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -12851,8 +13065,7 @@ class _AccountScreenState extends State<AccountScreen> {
     final nameCtrl = TextEditingController(text: _name);
     final phoneCtrl = TextEditingController(text: _formatPhone(_phone));
     final emailCtrl = TextEditingController(text: _email);
-    bool otpSent = false;
-    final otpCtrl = TextEditingController();
+    // D3-fix: otpSent and otpCtrl removed — no OTP flow exists.
 
     showModalBottomSheet(
       context: context,
@@ -12894,29 +13107,12 @@ class _AccountScreenState extends State<AccountScreen> {
                       decoration: InputDecoration(
                         labelText: 'Mobile Number',
                         isDense: true,
-                        suffixIcon: IconButton(
-                          icon: Icon(otpSent ? Icons.check_circle : Icons.shield_outlined, color: VayaTheme.saffron, size: 20),
-                          onPressed: () {
-                            setModalState(() => otpSent = true);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('OTP sent to your mobile number (123456).')),
-                            );
-                          },
-                        ),
+                        // D3-fix: removed fake OTP shield button — no OTP is ever sent.
+                        helperText: 'Mobile re-verification will be required in a future update.',
+                        helperStyle: const TextStyle(fontSize: 10, color: VayaTheme.slate),
                       ),
                     ),
-                    if (otpSent) ...[
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: otpCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Enter 6-digit OTP',
-                          hintText: '123456',
-                          isDense: true,
-                        ),
-                      ),
-                    ],
+                    // D3-fix: entire OTP field block removed.
                     const SizedBox(height: 14),
                     TextField(
                       controller: emailCtrl,
@@ -13400,7 +13596,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   await _sendSupportTicket('live_chat', {'phone': _phone, 'name': _name});
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Connecting to 24x7 Support Chat...')),
+                      // L2-fix: honest toast — no realtime chat exists.
+                      const SnackBar(content: Text('Support request raised — an agent will contact you shortly.')),
                     );
                   }
                 },
@@ -13463,48 +13660,25 @@ class _AccountScreenState extends State<AccountScreen> {
                   IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
                 ],
               ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: VayaTheme.signalCream,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: VayaTheme.fog),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Case #DISP-89201', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text('In Progress', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.brown)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    const Text('Issue: Fare discrepancy adjustment request', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 4),
-                    const Text('Status: Under investigation by logistics desk (Expected resolution: 24 hrs)', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
-                    const SizedBox(height: 10),
-                    const Text('Evidence Attached: 2 Documents (POD Receipt & Waybill photo)', style: TextStyle(fontSize: 10, color: VayaTheme.saffron, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: VayaTheme.saffron),
-                onPressed: () async {
-                  await _sendSupportTicket('dispute_view', {'caseId': 'DISP-89201'});
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-                child: const Text('Close Case View', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              // D6-fix: removed hardcoded fake case — replaced with empty state.
+              Column(
+                children: [
+                  const Icon(Icons.gavel_rounded, size: 48, color: VayaTheme.fog),
+                  const SizedBox(height: 12),
+                  const Text('No Disputes Filed', style: TextStyle(fontFamily: 'General Sans', fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Any disputes or refund cases you raise with VAYA support will appear here.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: VayaTheme.slate),
+                  ),
+                  const SizedBox(height: 20),
+                  OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Close'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -13653,13 +13827,14 @@ class _AccountScreenState extends State<AccountScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Enter 6-digit verification OTP sent to your phone to confirm identity:', style: TextStyle(fontSize: 11)),
+                  // D4-fix: changed to 'type DELETE' confirmation — no OTP was ever sent.
+                  const Text('Type DELETE below to confirm permanent account deactivation:', style: TextStyle(fontSize: 11)),
                   const SizedBox(height: 8),
                   TextField(
                     controller: otpCtrl,
-                    keyboardType: TextInputType.number,
+                    keyboardType: TextInputType.text,
                     decoration: const InputDecoration(
-                      hintText: 'Enter 123456',
+                      hintText: 'Type DELETE to confirm',
                       isDense: true,
                     ),
                   ),
@@ -13671,32 +13846,44 @@ class _AccountScreenState extends State<AccountScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
                 onPressed: () async {
-                  if (otpCtrl.text.trim() == '123456' || otpCtrl.text.trim().length == 6) {
+                  // D4-fix: replaced hardcoded '123456' check with a 'DELETE' confirmation.
+                  if (otpCtrl.text.trim().toUpperCase() == 'DELETE') {
                     Navigator.pop(ctx);
                     try {
                       final token = await CustomerAuthHelper.getAuthToken();
                       if (token != null) {
-                        await http.delete(
+                        final response = await http.delete(
                           Uri.parse('$apiBaseUrl/api/customer/me'),
                           headers: {'Authorization': 'Bearer $token'},
                         ).timeout(const Duration(seconds: 8));
+                        // D4-fix: only show success if the API call actually succeeded.
+                        if (response.statusCode == 200 && mounted) {
+                          await CustomerSessionManager.clearSession();
+                          await FirebaseAuth.instance.signOut();
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(builder: (_) => const AuthWrapper()),
+                            (route) => false,
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Account permanently deactivated. Invoices archived per legal requirement.')),
+                          );
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Failed to deactivate account. Please try again or contact support.'), backgroundColor: Colors.red),
+                          );
+                        }
                       }
-                    } catch (_) {}
-                    await CustomerSessionManager.clearSession();
-                    await FirebaseAuth.instance.signOut();
-                    if (mounted) {
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (_) => const AuthWrapper()),
-                        (route) => false,
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Account permanently deactivated. Invoices archived per legal requirement.')),
-                      );
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                        );
+                      }
                     }
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Invalid OTP. Please enter 123456.')),
+                      const SnackBar(content: Text('Please type DELETE to confirm account deactivation.')),
                     );
                   }
                 },

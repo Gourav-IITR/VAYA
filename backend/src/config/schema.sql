@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS bookings (
     vehicle_type VARCHAR(20) NOT NULL,
     weight INT NOT NULL,
     estimated_cost DECIMAL(10, 2) NOT NULL,
-    status VARCHAR(30) DEFAULT 'pending', -- 'pending', 'accepted', 'arrived_pickup', 'picking_up', 'in_transit', 'arrived_dropoff', 'completed', 'cancelled', 'expired'
+    status VARCHAR(30) DEFAULT 'pending', -- actual states written by code: 'pending' -> 'accepted' -> 'arrived_pickup' -> 'dropping_off' -> 'arrived_dropoff' -> 'completed' (also: 'cancelled', 'expired')
     otp VARCHAR(6) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL
@@ -245,6 +245,9 @@ CREATE TABLE IF NOT EXISTS customer_wallet_transactions (
 
 -- Track Razorpay payment ID on bookings for online/wallet payments
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(50);
+
+-- Store the number of helpers requested; server-side fare already includes helper fees
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS helpers_count INT DEFAULT 0;
 
 -- Driver Bank Account & UPI Details for Daily Payouts
 ALTER TABLE drivers ADD COLUMN IF NOT EXISTS upi_id VARCHAR(100);

@@ -222,6 +222,7 @@ function LoaderScene({ pixelSize, mode, progress, vehicleType, reduced }) {
     if (activeRouteRef.current) {
       try {
         setTotalPathLength(activeRouteRef.current.getTotalLength());
+      // eslint-disable-next-line no-empty
       } catch (e) {}
     }
   }, []);

@@ -33,8 +33,12 @@
         android:name="android.app.Application"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
-        android:fullBackupContent="false"
-        android:usesCleartextTraffic="true">
+        android:fullBackupContent="false">
+        <!-- android:usesCleartextTraffic removed — Audit Medium #3. -->
+        <!-- Release builds must not permit plain-HTTP connections.
+             For local dev / Nominatim geocoding over HTTP, add a
+             res/xml/network_security_config.xml that allows cleartext only
+             for specific debug hosts and reference it here. -->
 
         <meta-data
             android:name="flutterEmbedding"

@@ -104,12 +104,22 @@ gcloud services enable run.googleapis.com containerregistry.googleapis.com
 gcloud builds submit --tag gcr.io/"$PROJECT_ID"/vaya-backend
 
 # Deploy the image
+# Audit fix High #2: use --update-env-vars instead of --set-env-vars.
+# --set-env-vars REPLACES the entire env on every deploy, which wipes secrets
+# like RAZORPAY_KEY_SECRET that were set separately. --update-env-vars only
+# touches the variables listed here, leaving all others intact.
+#
+# Secrets (RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET) should be stored in
+# Google Secret Manager and referenced via --set-secrets, e.g.:
+#   --set-secrets RAZORPAY_KEY_SECRET=razorpay-key-secret:latest
+#   --set-secrets RAZORPAY_WEBHOOK_SECRET=razorpay-webhook-secret:latest
+# Set NODE_ENV=production so the global error handler redacts err.message (Medium #2 fix).
 gcloud run deploy vaya-backend \
   --image gcr.io/"$PROJECT_ID"/vaya-backend \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars DATABASE_URL="$DATABASE_URL"
+  --update-env-vars NODE_ENV=production,DATABASE_URL="$DATABASE_URL"
 
 cd ..
 

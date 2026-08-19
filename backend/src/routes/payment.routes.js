@@ -11,9 +11,12 @@ import { sendOrderStatusNotification } from '../services/notification.service.js
 const router = express.Router();
 
 // ── Razorpay Instance ──────────────────────────────────────────────────────
+// Audit fix High #3: removed `|| ''` fallbacks. If secrets are missing the server
+// refuses to start (see server.js startup guard). An empty HMAC secret allows
+// anyone to forge a valid Razorpay signature.
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
-const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET;
 
 let razorpayInstance = null;
 if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) {
@@ -111,13 +114,18 @@ router.post(
       const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
       const userId = req.user.uid;
 
-      // 1. Verify HMAC-SHA256 signature
+      // 1. Verify HMAC-SHA256 signature.
+      // Audit fix High #5 (empty secret): RAZORPAY_KEY_SECRET is guaranteed non-empty
+      // by the startup guard in server.js.
+      // Audit fix Low #1 (timing-safe compare): replaced !== with timingSafeEqual.
       const expectedSignature = crypto
         .createHmac('sha256', RAZORPAY_KEY_SECRET)
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest('hex');
 
-      if (expectedSignature !== razorpay_signature) {
+      const sigA = Buffer.from(expectedSignature);
+      const sigB = Buffer.from(razorpay_signature);
+      if (sigA.length !== sigB.length || !crypto.timingSafeEqual(sigA, sigB)) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Payment verification failed. Invalid signature.' });
       }
@@ -139,6 +147,14 @@ router.post(
       if (paymentOrder.status === 'paid') {
         await client.query('ROLLBACK');
         return res.json({ success: true, message: 'Payment already verified.', already_verified: true });
+      }
+
+      // Audit fix Medium #5 (ownership check): settle to the order's owner, not
+      // the request caller. Without this check any authenticated user could POST
+      // a valid Razorpay callback for someone else's order and credit their own wallet.
+      if (paymentOrder.user_id !== userId) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Forbidden: payment order does not belong to you.' });
       }
 
       // 3. Mark payment order as paid
@@ -199,13 +215,16 @@ router.post('/webhook', async (req, res) => {
       return res.status(400).json({ error: 'Missing webhook signature or body' });
     }
 
-    // Verify webhook signature
+    // Verify webhook signature.
+    // Audit fix Low #1 (timing-safe compare): replaced !== with timingSafeEqual.
     const expectedSignature = crypto
       .createHmac('sha256', RAZORPAY_WEBHOOK_SECRET)
       .update(webhookBody)
       .digest('hex');
 
-    if (expectedSignature !== webhookSignature) {
+    const sigA = Buffer.from(expectedSignature);
+    const sigB = Buffer.from(webhookSignature);
+    if (sigA.length !== sigB.length || !crypto.timingSafeEqual(sigA, sigB)) {
       console.error('⚠️ Razorpay webhook signature mismatch');
       return res.status(400).json({ error: 'Invalid webhook signature' });
     }

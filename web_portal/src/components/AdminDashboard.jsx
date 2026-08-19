@@ -98,18 +98,21 @@ export default function AdminDashboard({ adminUser }) {
         return null;
       };
 
-      const [metricsData, bookingsData, driversData, auditData] = await Promise.all([
+      const [metricsData, bookingsData, auditData] = await Promise.all([
         fetchJson(`${apiBaseUrl}/api/admin/dashboard`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/bookings`, { headers }),
-        fetchJson(`${apiBaseUrl}/api/admin/drivers`, { headers }),
         fetchJson(`${apiBaseUrl}/api/admin/audit-log`, { headers }),
       ]);
+      // Try /api/admin/partners first; fall back to /api/admin/drivers if null
+      const driversData =
+        (await fetchJson(`${apiBaseUrl}/api/admin/partners`, { headers })) ??
+        (await fetchJson(`${apiBaseUrl}/api/admin/drivers`, { headers }));
 
       const pricingData = await fetchJson(`${apiBaseUrl}/api/health/pricing-config`);
 
       if (metricsData) setMetrics(metricsData.metrics || {});
       if (bookingsData) setBookings(bookingsData.bookings || []);
-      if (driversData) setDrivers(driversData.drivers || []);
+      if (driversData) setDrivers(driversData.partners || driversData.drivers || []);
       if (auditData) setAuditLogs(auditData.logs || []);
 
       const list = pricingData?.pricing || (Array.isArray(pricingData) ? pricingData : null);
@@ -127,6 +130,7 @@ export default function AdminDashboard({ adminUser }) {
         setPricingConfig(formatted);
         try {
           localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+        // eslint-disable-next-line no-empty
         } catch (e) {}
       }
     } catch (e) {
@@ -155,6 +159,7 @@ export default function AdminDashboard({ adminUser }) {
       setPricingConfig(payload);
       try {
         localStorage.setItem('vaya_pricing_config', JSON.stringify(payload));
+      // eslint-disable-next-line no-empty
       } catch (err) {}
 
       const res = await fetch(`${apiBaseUrl}/api/admin/pricing-config`, {
@@ -182,6 +187,7 @@ export default function AdminDashboard({ adminUser }) {
         setPricingConfig(formatted);
         try {
           localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+        // eslint-disable-next-line no-empty
         } catch (e) {}
         alert('Pricing rates updated live successfully!');
       } else if (res.status === 429) {
@@ -195,6 +201,20 @@ export default function AdminDashboard({ adminUser }) {
       alert('Error updating pricing configuration.');
     }
   };
+
+  // Recalculate driver metrics whenever drivers list updates
+  useEffect(() => {
+    if (!drivers || drivers.length === 0) return;
+    const online = drivers.filter(d => d.status === 'online').length;
+    const busy = drivers.filter(d => d.status === 'busy').length;
+    const offline = drivers.filter(d => !d.status || d.status === 'offline').length;
+    setMetrics(prev => ({
+      ...prev,
+      driversOnline: online,
+      driversBusy: busy,
+      driversOffline: offline
+    }));
+  }, [drivers]);
 
   useEffect(() => {
     fetchData();
@@ -210,15 +230,16 @@ export default function AdminDashboard({ adminUser }) {
           const data = JSON.parse(event.data);
           
           if (data.type === 'driver_position') {
-            setDrivers(prev => prev.map(d => d.id === data.driverId ? { ...d, lat: data.lat, lng: data.lng, status: data.status } : d));
+            setDrivers(prev => prev.map(d => d.id === data.driverId ? { ...d, lat: data.lat, lng: data.lng, status: data.status || d.status } : d));
           } else if (data.type === 'driver_status') {
             setDrivers(prev => {
               const exists = prev.some(d => d.id === data.driverId);
               if (exists) {
-                return prev.map(d => d.id === data.driverId ? { ...d, status: data.status, ...data.driver } : d);
-              } else {
+                return prev.map(d => d.id === data.driverId ? { ...d, status: data.status, ...(data.driver || {}) } : d);
+              } else if (data.driver) {
                 return [data.driver, ...prev];
               }
+              return prev;
             });
           } else if (data.type === 'booking_created') {
             setBookings(prev => [data.booking, ...prev]);
@@ -238,6 +259,7 @@ export default function AdminDashboard({ adminUser }) {
             setPricingConfig(formatted);
             try {
               localStorage.setItem('vaya_pricing_config', JSON.stringify(formatted));
+            // eslint-disable-next-line no-empty
             } catch (e) {}
           }
         };
@@ -258,7 +280,7 @@ export default function AdminDashboard({ adminUser }) {
     if (!window.confirm('Are you sure you want to approve this driver partner?')) return;
     try {
       const token = await adminUser.getIdToken();
-      const res = await fetch(`${apiBaseUrl}/api/admin/drivers/${driverId}/approve`, {
+      const res = await fetch(`${apiBaseUrl}/api/admin/partners/${driverId}/approve`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -464,6 +486,7 @@ export default function AdminDashboard({ adminUser }) {
                         <th style={{ padding: '12px 8px' }}>Rating</th>
                         <th style={{ padding: '12px 8px' }}>Vehicle Info</th>
                         <th style={{ padding: '12px 8px' }}>Capacity</th>
+                        <th style={{ padding: '12px 8px' }}>Live Status</th>
                         <th style={{ padding: '12px 8px' }}>Approval Status</th>
                         <th style={{ padding: '12px 8px' }}>Actions</th>
                       </tr>
@@ -471,7 +494,7 @@ export default function AdminDashboard({ adminUser }) {
                     <tbody>
                       {drivers.length === 0 ? (
                         <tr>
-                          <td colSpan="7" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>No driver partners registered.</td>
+                          <td colSpan="8" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>No driver partners registered.</td>
                         </tr>
                       ) : (
                         drivers.map(d => (
@@ -489,6 +512,24 @@ export default function AdminDashboard({ adminUser }) {
                               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{d.vehicle_reg}</div>
                             </td>
                             <td style={{ padding: '12px 8px' }}>{d.weight_capacity} kg</td>
+                            <td style={{ padding: '12px 8px' }}>
+                              <span style={{ 
+                                display: 'inline-flex', 
+                                alignItems: 'center', 
+                                gap: '6px', 
+                                padding: '4px 10px', 
+                                borderRadius: '12px', 
+                                fontSize: '12px', 
+                                fontWeight: '600',
+                                textTransform: 'capitalize',
+                                backgroundColor: d.status === 'online' ? '#dcfce7' : d.status === 'busy' ? '#fef9c3' : '#f1f5f9',
+                                color: d.status === 'online' ? '#15803d' : d.status === 'busy' ? '#a16207' : '#64748b',
+                                border: `1px solid ${d.status === 'online' ? '#bbf7d0' : d.status === 'busy' ? '#fef08a' : '#e2e8f0'}`
+                              }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: d.status === 'online' ? '#16a34a' : d.status === 'busy' ? '#eab308' : '#94a3b8' }} />
+                                {d.status || 'offline'}
+                              </span>
+                            </td>
                             <td style={{ padding: '12px 8px' }}>
                               <span className={`badge ${d.is_approved ? 'badge-success' : 'badge-warning'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                 {d.is_approved ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
