@@ -77,7 +77,7 @@ EOT
 # Sync same credentials to public website if needed
 cp web_portal/.env public_website/.env
 
-# 4. Build and Compile static assets
+# 4. Build and Compile static assets & Flutter Web Apps
 echo ""
 echo ">>> Building VAYA Web Portal distribution files..."
 cd web_portal
@@ -90,6 +90,18 @@ echo ">>> Building VAYA Public Website distribution files..."
 cd public_website
 npm install
 npm run build
+cd ..
+
+echo ""
+echo ">>> Building VAYA Customer Flutter Web App..."
+cd customer_app
+flutter build web --release
+cd ..
+
+echo ""
+echo ">>> Building VAYA Partner Flutter Web App..."
+cd partner_app
+flutter build web --release
 cd ..
 
 # 5. Build & Deploy Backend on Google Cloud Run
@@ -123,12 +135,14 @@ gcloud run deploy vaya-backend \
 
 cd ..
 
-# 6. Deploy Web Portal & Public Site to Firebase Hosting
+# 6. Deploy Multi-Site Assets to Firebase Hosting
 echo ""
-echo ">>> Deploying multi-site assets to Firebase Hosting..."
+echo ">>> Deploying multi-site assets (Public Site, Admin Portal, Customer Web App, Partner Web App) to Firebase Hosting..."
 echo "Note: If you have not created secondary site targets in Firebase console, you can run:"
 echo "  1. npx firebase-tools target:apply hosting public <your-default-site-id>"
 echo "  2. npx firebase-tools target:apply hosting admin <your-custom-admin-site-id>"
+echo "  3. npx firebase-tools target:apply hosting customer <your-customer-site-id>"
+echo "  4. npx firebase-tools target:apply hosting partner <your-partner-site-id>"
 echo ""
 
 npx firebase-tools deploy --only hosting --project "$PROJECT_ID"

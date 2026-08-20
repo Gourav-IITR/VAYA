@@ -384,6 +384,22 @@ cd partner_app && flutter build appbundle --release
 
 ## Web Applications
 
+### Customer Web Application (`customer_app/`)
+- **URL**: [vaya-customer-app.web.app](https://vaya-customer-app.web.app)
+- **Tech**: Flutter Web (compiled from live `customer_app` Dart codebase)
+- **Features**:
+  - Full mobile booking experience in browser
+  - Fare estimation and map route pickup/drop selection
+  - Real-time order tracking and payments via Razorpay
+
+### Partner Web Application (`partner_app/`)
+- **URL**: [vaya-partner-app.web.app](https://vaya-partner-app.web.app)
+- **Tech**: Flutter Web (compiled from live `partner_app` Dart codebase)
+- **Features**:
+  - Full driver & partner workflow in browser
+  - Online/offline status toggle and real-time job acceptance
+  - Live ride updates and earnings ledger view
+
 ### Admin Dashboard (`web_portal/`)
 - **URL**: [vaya-logistics-admin.web.app](https://vaya-logistics-admin.web.app)
 - **Auth**: Firebase Email/Password (requires `role: 'admin'` custom claim)
@@ -400,7 +416,7 @@ cd partner_app && flutter build appbundle --release
 - **Features**:
   - Service landing page
   - Fare estimation calculator
-  - App download links
+  - App download links and webapp access buttons
 
 ---
 

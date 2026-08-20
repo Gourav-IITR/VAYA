@@ -71,6 +71,8 @@ Vite generates static assets that can be hosted for free on Firebase Hosting.
    ```bash
    cd web_portal && npm run build && cd ..
    cd public_website && npm run build && cd ..
+   cd customer_app && flutter build web --release && cd ..
+   cd partner_app && flutter build web --release && cd ..
    ```
 
 ### Deploy to Firebase (Multi-Site)
@@ -89,9 +91,15 @@ Vite generates static assets that can be hosted for free on Firebase Hosting.
    
    # Bind secondary custom site to your admin operations portal
    firebase target:apply hosting admin [YOUR_ADMIN_SITE_ID]
+
+   # Bind customer site to your customer Flutter webapp
+   firebase target:apply hosting customer [YOUR_CUSTOMER_SITE_ID]
+
+   # Bind partner site to your partner Flutter webapp
+   firebase target:apply hosting partner [YOUR_PARTNER_SITE_ID]
    ```
-4. Deploy both sites concurrently:
+4. Deploy all sites concurrently:
    ```bash
    firebase deploy --only hosting --project [YOUR_PROJECT_ID]
    ```
-5. Firebase will output your live URLs (e.g. `https://vaya.web.app` and `https://vaya-admin.web.app`).
+5. Firebase will output your live URLs (e.g. `https://vaya.web.app`, `https://vaya-admin.web.app`, `https://vaya-customer-app.web.app`, and `https://vaya-partner-app.web.app`).
