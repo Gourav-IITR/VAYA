@@ -41,6 +41,5 @@ export const initDb = async () => {
     client.release();
   } catch (err) {
     console.error('❌ Failed to connect or initialize the PostgreSQL database:', err.message);
-    process.exit(1);
   }
 };

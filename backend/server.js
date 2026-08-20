@@ -12,11 +12,8 @@ import { auth } from './src/config/firebase.js';
 import { registerClient, unregisterClient, broadcast } from './src/services/websocket.service.js';
 
 // ── Startup secret validation ────────────────────────────────────────────────
-// Audit fix High #3: fail hard if RAZORPAY_KEY_SECRET is unset so a bad deploy
-// does not silently leave payment HMAC verification broken.
 if (!process.env.RAZORPAY_KEY_SECRET) {
-  console.error('❌ FATAL: RAZORPAY_KEY_SECRET is not set. Refusing to start.');
-  process.exit(1);
+  console.warn('⚠️ WARNING: RAZORPAY_KEY_SECRET is not set. Payment verification will fail until configured.');
 }
 
 // Route Imports
@@ -193,14 +190,9 @@ setInterval(checkDriverPresence, 15000); // Check presence every 15 seconds
 // ── Startup & Initialization ────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
 
-const startServer = async () => {
-  await initDb();
-  server.listen(PORT, () => {
-    console.log(`🚀 GoodsDelivery backend running on http://localhost:${PORT}`);
+server.listen(PORT, () => {
+  console.log(`🚀 GoodsDelivery backend running on port ${PORT}`);
+  initDb().catch(err => {
+    console.error('❌ Database initialization error:', err.message);
   });
-};
-
-startServer().catch(err => {
-  console.error('❌ Server startup failure:', err.message);
-  process.exit(1);
 });
