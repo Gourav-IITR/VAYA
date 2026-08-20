@@ -2517,7 +2517,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
       double? lng;
       if (online) {
         try {
-          fcmToken = await FirebaseMessaging.instance.getToken();
+          if (!kIsWeb) {
+            fcmToken = await FirebaseMessaging.instance.getToken();
+          }
         } catch (_) {}
         try {
           Position curPos = await Geolocator.getCurrentPosition(

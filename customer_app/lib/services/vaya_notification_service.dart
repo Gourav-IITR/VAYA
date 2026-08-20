@@ -35,7 +35,9 @@ class VayaNotificationService {
     _onOpenDeliveryScreen = onOpenDeliveryScreen;
 
     try {
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      if (!kIsWeb) {
+        FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      }
     } catch (e) {
       debugPrint('[FCM] Background handler registration skipped/failed: $e');
     }
@@ -87,17 +89,19 @@ class VayaNotificationService {
       );
       debugPrint('[FCM] Notification authorization status: ${settings.authorizationStatus}');
 
-      // 4. Fetch & Register FCM Token with Backend
-      final token = await messaging.getToken();
-      if (token != null && apiBaseUrl != null && getAuthToken != null) {
-        await _registerFcmToken(token, apiBaseUrl, getAuthToken);
-      }
-
-      messaging.onTokenRefresh.listen((newToken) {
-        if (apiBaseUrl != null && getAuthToken != null) {
-          _registerFcmToken(newToken, apiBaseUrl, getAuthToken);
+      // 4. Fetch & Register FCM Token with Backend (Mobile only)
+      if (!kIsWeb) {
+        final token = await messaging.getToken();
+        if (token != null && apiBaseUrl != null && getAuthToken != null) {
+          await _registerFcmToken(token, apiBaseUrl, getAuthToken);
         }
-      });
+
+        messaging.onTokenRefresh.listen((newToken) {
+          if (apiBaseUrl != null && getAuthToken != null) {
+            _registerFcmToken(newToken, apiBaseUrl, getAuthToken);
+          }
+        });
+      }
     } catch (e) {
       debugPrint('[FCM] Error requesting FCM permissions / fetching token: $e');
     }
