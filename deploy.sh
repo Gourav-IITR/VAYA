@@ -144,7 +144,17 @@ npx -y firebase-tools target:apply hosting admin vaya-logistics-admin --project 
 npx -y firebase-tools target:apply hosting customer vaya-customer-app --project "$PROJECT_ID" 2>/dev/null || true
 npx -y firebase-tools target:apply hosting partner vaya-partner-app --project "$PROJECT_ID" 2>/dev/null || true
 
-npx -y firebase-tools deploy --only hosting --project "$PROJECT_ID"
+echo ">>> Deploying Customer Web App to Firebase Hosting..."
+npx -y firebase-tools deploy --only hosting:customer --project "$PROJECT_ID"
+
+echo ">>> Deploying Partner Web App to Firebase Hosting..."
+npx -y firebase-tools deploy --only hosting:partner --project "$PROJECT_ID"
+
+echo ">>> Deploying Admin Portal to Firebase Hosting..."
+npx -y firebase-tools deploy --only hosting:admin --project "$PROJECT_ID"
+
+echo ">>> Deploying Public Website to Firebase Hosting..."
+npx -y firebase-tools deploy --only hosting:public --project "$PROJECT_ID"
 
 echo ""
 echo "============================================="
