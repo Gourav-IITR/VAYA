@@ -11,7 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -671,11 +671,24 @@ class VayaHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (kDebugMode) {
+  if (!kIsWeb && kDebugMode) {
     HttpOverrides.global = VayaHttpOverrides();
   }
   try {
-    await Firebase.initializeApp();
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: 'AIzaSyCYn1asbIsltGhURbsjFKmosrS_2P1WUdc',
+          authDomain: 'goods-delivery-platform.firebaseapp.com',
+          projectId: 'goods-delivery-platform',
+          storageBucket: 'goods-delivery-platform.firebasestorage.app',
+          messagingSenderId: '275777907648',
+          appId: '1:275777907648:web:d7962496a75c7981527625',
+        ),
+      );
+    } else {
+      await Firebase.initializeApp();
+    }
   } catch (e) {
     debugPrint("Firebase initialization skipped or already running: $e");
   }
@@ -7732,7 +7745,7 @@ class TrackingScreen extends StatefulWidget {
 }
 
 class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
-  IOWebSocketChannel? _channel;
+  WebSocketChannel? _channel;
   GoogleMapController? _mapController;
   late AnimationController _pulseController;
   late AnimationController _vMarkController;
@@ -8140,7 +8153,7 @@ Track live on VAYA Customer App!
       final token = await CustomerAuthHelper.getAuthToken();
       if (token == null) return;
 
-      _channel = IOWebSocketChannel.connect(
+      _channel = WebSocketChannel.connect(
         Uri.parse('$wsBaseUrl/ws?token=$token'),
       );
 

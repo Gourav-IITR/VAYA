@@ -11,7 +11,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'widgets/payment_method_sheet.dart';
@@ -501,11 +501,24 @@ typedef VayaDriverApp = VayaPartnerApp;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (kDebugMode) {
+  if (!kIsWeb && kDebugMode) {
     HttpOverrides.global = VayaHttpOverrides();
   }
   try {
-    await Firebase.initializeApp();
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: 'AIzaSyCYn1asbIsltGhURbsjFKmosrS_2P1WUdc',
+          authDomain: 'goods-delivery-platform.firebaseapp.com',
+          projectId: 'goods-delivery-platform',
+          storageBucket: 'goods-delivery-platform.firebasestorage.app',
+          messagingSenderId: '275777907648',
+          appId: '1:275777907648:web:d7962496a75c7981527625',
+        ),
+      );
+    } else {
+      await Firebase.initializeApp();
+    }
   } catch (e) {
     debugPrint("Firebase initialization skipped or already running: $e");
   }
@@ -1555,7 +1568,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
   bool _isTogglingStatus = false;
   LatLng? _currentPosition;
   GoogleMapController? _mapController;
-  IOWebSocketChannel? _channel;
+  WebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
   StreamSubscription<RemoteMessage>? _fcmSubscription;
   DateTime? _lastLocationSyncTime;
@@ -2677,7 +2690,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with SingleTickerPr
       final token = await DriverAuthHelper.getAuthToken();
       if (token == null) return;
 
-      _channel = IOWebSocketChannel.connect(
+      _channel = WebSocketChannel.connect(
         Uri.parse('$wsBaseUrl/ws?token=$token'),
       );
 
