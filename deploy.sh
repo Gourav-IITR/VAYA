@@ -18,9 +18,9 @@ if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q
   exit 1
 fi
 echo ">>> Checking Firebase CLI authentication..."
-if ! npx firebase-tools projects:list &>/dev/null; then
+if ! npx -y firebase-tools projects:list >/dev/null 2>&1; then
   echo ">>> Firebase session expired or not authenticated. Logging in..."
-  npx firebase-tools login --no-localhost
+  npx -y firebase-tools login --no-localhost
 fi
 
 # Load from .env.deploy if it exists
@@ -145,7 +145,7 @@ echo "  3. npx firebase-tools target:apply hosting customer <your-customer-site-
 echo "  4. npx firebase-tools target:apply hosting partner <your-partner-site-id>"
 echo ""
 
-npx firebase-tools deploy --only hosting --project "$PROJECT_ID"
+npx -y firebase-tools deploy --only hosting --project "$PROJECT_ID"
 
 echo ""
 echo "============================================="
