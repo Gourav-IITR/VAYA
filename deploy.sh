@@ -135,15 +135,14 @@ gcloud run deploy vaya-backend \
 
 cd ..
 
-# 6. Deploy Multi-Site Assets to Firebase Hosting
-echo ""
-echo ">>> Deploying multi-site assets (Public Site, Admin Portal, Customer Web App, Partner Web App) to Firebase Hosting..."
-echo "Note: If you have not created secondary site targets in Firebase console, you can run:"
-echo "  1. npx firebase-tools target:apply hosting public <your-default-site-id>"
-echo "  2. npx firebase-tools target:apply hosting admin <your-custom-admin-site-id>"
-echo "  3. npx firebase-tools target:apply hosting customer <your-customer-site-id>"
-echo "  4. npx firebase-tools target:apply hosting partner <your-partner-site-id>"
-echo ""
+echo ">>> Ensuring Firebase Hosting sites and targets are configured..."
+npx -y firebase-tools hosting:sites:create vaya-customer-app --project "$PROJECT_ID" 2>/dev/null || true
+npx -y firebase-tools hosting:sites:create vaya-partner-app --project "$PROJECT_ID" 2>/dev/null || true
+
+npx -y firebase-tools target:apply hosting public goods-delivery-platform --project "$PROJECT_ID" 2>/dev/null || true
+npx -y firebase-tools target:apply hosting admin vaya-logistics-admin --project "$PROJECT_ID" 2>/dev/null || true
+npx -y firebase-tools target:apply hosting customer vaya-customer-app --project "$PROJECT_ID" 2>/dev/null || true
+npx -y firebase-tools target:apply hosting partner vaya-partner-app --project "$PROJECT_ID" 2>/dev/null || true
 
 npx -y firebase-tools deploy --only hosting --project "$PROJECT_ID"
 
