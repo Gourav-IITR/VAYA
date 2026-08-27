@@ -10324,7 +10324,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
       final token = await CustomerAuthHelper.getAuthToken();
       if (token != null) {
         final res = await http.get(
-          Uri.parse('$apiBaseUrl/api/bookings'),
+          Uri.parse('$apiBaseUrl/api/booking'),
           headers: {'Authorization': 'Bearer $token'},
         ).timeout(const Duration(seconds: 20));
 
