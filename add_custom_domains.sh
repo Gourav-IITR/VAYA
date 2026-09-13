@@ -47,8 +47,20 @@ register_domain() {
   fi
 }
 
-# Register primary apex domain & subdomains
-register_domain "goods-delivery-platform" "vayadelivery.com"
+# Register primary apex domain as redirect to www.vayadelivery.com
+echo "--> Configuring apex domain redirect: vayadelivery.com -> www.vayadelivery.com..."
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://firebasehosting.googleapis.com/v1beta1/projects/$PROJECT/sites/goods-delivery-platform/customDomains?customDomainId=vayadelivery.com" \
+  -d '{
+    "redirect": {
+      "type": "MOVED_PERMANENTLY",
+      "targetUri": "www.vayadelivery.com"
+    }
+  }' >/dev/null || true
+
+# Register primary www domain & subdomains
 register_domain "goods-delivery-platform" "www.vayadelivery.com"
 register_domain "vaya-customer-app" "app.vayadelivery.com"
 register_domain "vaya-partner-app" "partner.vayadelivery.com"
