@@ -382,10 +382,20 @@ cd partner_app && flutter build appbundle --release
 
 ---
 
-## Web Applications
+## Web Applications & Production Custom Domains
+
+### Landing Page / Public Website (`public_website/`)
+- **Production URL**: [vayadelivery.com](https://vayadelivery.com) (or [www.vayadelivery.com](https://www.vayadelivery.com))
+- **Firebase Site**: `goods-delivery-platform.web.app`
+- **Features**:
+  - Main brand landing page & municipal logistics overview
+  - Live 8-character booking ID tracking widget
+  - Vehicle options, rate tier calculator, and business contact forms
+  - Direct launch links to Customer App, Partner App, and Admin Operations Portal
 
 ### Customer Web Application (`customer_app/`)
-- **URL**: [vaya-customer-app.web.app](https://vaya-customer-app.web.app)
+- **Production URL**: [app.vayadelivery.com](https://app.vayadelivery.com) (or [customer.vayadelivery.com](https://customer.vayadelivery.com))
+- **Firebase Site**: `vaya-customer-app.web.app`
 - **Tech**: Flutter Web (compiled from live `customer_app` Dart codebase)
 - **Features**:
   - Full mobile booking experience in browser
@@ -393,7 +403,8 @@ cd partner_app && flutter build appbundle --release
   - Real-time order tracking and payments via Razorpay
 
 ### Partner Web Application (`partner_app/`)
-- **URL**: [vaya-partner-app.web.app](https://vaya-partner-app.web.app)
+- **Production URL**: [partner.vayadelivery.com](https://partner.vayadelivery.com)
+- **Firebase Site**: `vaya-partner-app.web.app`
 - **Tech**: Flutter Web (compiled from live `partner_app` Dart codebase)
 - **Features**:
   - Full driver & partner workflow in browser
@@ -401,7 +412,8 @@ cd partner_app && flutter build appbundle --release
   - Live ride updates and earnings ledger view
 
 ### Admin Dashboard (`web_portal/`)
-- **URL**: [vaya-logistics-admin.web.app](https://vaya-logistics-admin.web.app)
+- **Production URL**: [admin.vayadelivery.com](https://admin.vayadelivery.com)
+- **Firebase Site**: `vaya-logistics-admin.web.app`
 - **Auth**: Firebase Email/Password (requires `role: 'admin'` custom claim)
 - **Features**:
   - Live driver tracking map (Leaflet + OSM)
@@ -411,12 +423,6 @@ cd partner_app && flutter build appbundle --release
   - Partner ledger and settlement tools
   - Audit logs viewer
 
-### Public Website (`public_website/`)
-- **URL**: [goods-delivery-platform.web.app](https://goods-delivery-platform.web.app)
-- **Features**:
-  - Service landing page
-  - Fare estimation calculator
-  - App download links and webapp access buttons
 
 ---
 
@@ -508,8 +514,8 @@ GM_API_KEY=...
 
 | Component | Version | Build |
 |-----------|---------|-------|
-| Customer App | 1.0.12 | 13 |
-| Driver App | 1.0.10 | 11 |
+| Customer App | 1.0.15 | 16 |
+| Driver App | 1.0.13 | 14 |
 | Backend | 1.0.0 | — |
 | Flutter SDK | ≥3.4.0 | — |
 | Compile SDK (Android) | 36 | — |

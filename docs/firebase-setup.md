@@ -90,3 +90,16 @@ For pushing cargo alerts and job matching notifications:
 3. Download `google-services.json` for each and place them in:
    - `customer_app/android/app/google-services.json`
    - `partner_app/android/app/google-services.json`
+
+---
+
+## 6. Firebase Authentication Authorized Domains (`vayadelivery.com`)
+To allow Phone Auth reCAPTCHA verification and OAuth login on custom domains:
+1. In Firebase Console, go to **Build** → **Authentication**.
+2. Click the **Settings** tab and select **Authorized domains**.
+3. Click **Add domain** and enter:
+   - `vayadelivery.com`
+   - `www.vayadelivery.com`
+   - `app.vayadelivery.com`
+   - `partner.vayadelivery.com`
+   - `admin.vayadelivery.com`

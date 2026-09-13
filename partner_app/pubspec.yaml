@@ -1,7 +1,7 @@
 name: partner_app
 description: "VAYA - Vehicle Partner Mobile Application"
 publish_to: 'none'
-version: 1.0.11+12
+version: 1.0.13+14
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

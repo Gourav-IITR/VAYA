@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../main.dart';
 import '../services/razorpay_service.dart';
 import 'vaya_loader.dart';
 
@@ -91,7 +92,7 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
     } catch (e) {
       if (mounted) {
         setState(() => _isSubmitting = false);
-        widget.onFailure('Payment initialization error: $e');
+        widget.onFailure('${LocalizedPartnerStrings.of(context).paymentInitError}: $e');
       }
     }
   }
@@ -164,9 +165,9 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Platform Dues Repayment',
-                    style: TextStyle(
+                  Text(
+                    LocalizedPartnerStrings.of(context).duesRepayment,
+                    style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF94A3B8),
@@ -193,9 +194,9 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
           const Divider(height: 1, color: Color(0xFF2C2C28)),
           const SizedBox(height: 16),
 
-          const Text(
-            'SELECT UPI APP FOR PAYMENT',
-            style: TextStyle(
+          Text(
+            LocalizedPartnerStrings.of(context).selectUpiForPayment,
+            style: const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
               color: Color(0xFFCBD5E1),
@@ -254,9 +255,9 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
                                   color: Color(0xFFFDFCF7),
                                 ),
                               ),
-                              const Text(
-                                'Instant UPI Payment',
-                                style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                              Text(
+                                LocalizedPartnerStrings.of(context).instantUpiPayment,
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
                               ),
                             ],
                           ),
@@ -292,7 +293,7 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      _selectedMethod == 'vpa' ? 'Hide manual UPI ID' : 'Or pay using UPI ID / VPA',
+                      _selectedMethod == 'vpa' ? LocalizedPartnerStrings.of(context).hideManualUpi : LocalizedPartnerStrings.of(context).payUsingUpiVpa,
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -310,7 +311,7 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
                 controller: _vpaController,
                 style: const TextStyle(color: Color(0xFFFDFCF7), fontWeight: FontWeight.w600),
                 decoration: InputDecoration(
-                  hintText: 'Enter UPI ID (e.g. name@upi)',
+                  hintText: LocalizedPartnerStrings.of(context).enterUpiHint,
                   hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                   filled: true,
                   fillColor: const Color(0xFF1E1E1B),
@@ -333,7 +334,7 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
                         final vpa = _vpaController.text.trim();
                         if (vpa.isEmpty || !vpa.contains('@')) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please enter a valid UPI ID (e.g. user@upi)')),
+                            SnackBar(content: Text(LocalizedPartnerStrings.of(context).validUpiMsg)),
                           );
                           return;
                         }
@@ -346,7 +347,7 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
                 ),
-                child: const Text('Pay via UPI ID', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                child: Text(LocalizedPartnerStrings.of(context).payViaUpi, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
               ),
             ],
           ],
@@ -355,12 +356,12 @@ class _PaymentMethodSheetState extends State<PaymentMethodSheet> {
 
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.shield_outlined, size: 14, color: Color(0xFF94A3B8)),
-              SizedBox(width: 6),
+            children: [
+              const Icon(Icons.shield_outlined, size: 14, color: Color(0xFF94A3B8)),
+              const SizedBox(width: 6),
               Text(
-                '256-bit Encrypted Payment • Direct App Handoff',
-                style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                LocalizedPartnerStrings.of(context).encryptedPaymentFooter,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
               ),
             ],
           ),

@@ -324,6 +324,7 @@ class VayaPartnerTheme {
   static ThemeData themeData = ThemeData(
     useMaterial3: true,
     fontFamily: 'Inter',
+    fontFamilyFallback: const ['Noto Sans', 'Roboto', 'sans-serif'],
     brightness: Brightness.dark,
     scaffoldBackgroundColor: inkBlack,
     colorScheme: const ColorScheme.dark(
@@ -486,6 +487,52 @@ class LocalizedPartnerStrings {
   String get termsConditions => _t('Terms & Operating Rules', 'ସର୍ତ୍ତାବଳୀ ଏବଂ ନିୟମ', 'शर्तें और नियम');
   String get signOut => _t('Sign Out', 'ସାଇନ୍ ଆଉଟ୍', 'साइन आउट');
   String get signOutConfirm => _t('Sign out of VAYA Partner?', 'VAYA ପାର୍ଟନର୍ ରୁ ସାଇନ୍ ଆଉଟ୍ କରିବେ?', 'VAYA पार्टनर से साइन आउट करें?');
+
+  // Additional Audited Partner Keys
+  String get goBack => _t('Go back', 'ପଛକୁ ଯାଆନ୍ତୁ', 'वापस जाएं');
+  String get confirmCollected => _t('Confirm collected', 'ସଂଗୃହିତ ରାଶି ନିଶ୍ଚିତ କରନ୍ତୁ', 'एकत्रित राशि की पुष्टि करें');
+  String get fareUpdated => _t('Fare updated', 'ଭଡ଼ା ଅପଡେଟ୍ ହୋଇଛି', 'किराया अपडेट किया गया');
+  String get reviewUpdatedFare => _t('Review updated fare', 'ଅପଡେଟ୍ ଭଡ଼ା ଯାଞ୍ଚ କରନ୍ତୁ', 'अपडेट किराए की समीक्षा करें');
+  String get done => _t('Done', 'ସମ୍ପୂର୍ଣ୍ଣ', 'पूर्ण');
+  String get viewTripDetails => _t('View trip details', 'ଯାତ୍ରା ବିବରଣୀ ଦେଖନ୍ତୁ', 'यात्रा विवरण देखें');
+  String get reportFareIssue => _t('Report fare issue', 'ଭଡ଼ା ସମସ୍ୟା ରିପୋର୍ଟ କରନ୍ତୁ', 'किराया समस्या की रिपोर्ट करें');
+  String get atDropoff => _t('At drop-off', 'ଡ୍ରପ୍-ଅଫ୍ରେ', 'ड्रॉप-ऑफ पर');
+  String get loadingSettlement => _t('Loading settlement summary...', 'ହିସାବ ବିବରଣୀ ଲୋଡ୍ ହେଉଛି...', 'ब्योरा लोड हो रहा है...');
+  String get retryServerFetch => _t('Retry Server Fetch', 'ସର୍ଭରରୁ ପୁନଃଚେଷ୍ଟା', 'सर्वर से पुनः प्रयास करें');
+  String get useLocalSettlement => _t('Use Local Settlement & Enter OTP', 'ସ୍ଥାନୀୟ ହିସାବ ବ୍ୟବହାର କରନ୍ତୁ ଏବଂ OTP ଦିଅନ୍ତୁ', 'स्थानीय ब्योरा उपयोग करें और ओटीपी दर्ज करें');
+  String get syncActiveTrip => _t('Sync / Refresh Active Trip', 'ସକ୍ରିୟ ଯାତ୍ରା ରିଫ୍ରେସ୍ କରନ୍ତୁ', 'सक्रिय यात्रा रीफ़्रेश करें');
+  String get pickupWaiting => _t('Pickup waiting', 'ପିକଅପ୍ ଅପେକ୍ଷା', 'पिकअप प्रतीक्षा');
+  String get dropoffWaiting => _t('Drop-off waiting', 'ଡ୍ରପ୍-ଅଫ୍ ଅପେକ୍ଷା', 'ड्रॉप-ऑफ प्रतीक्षा');
+  String get paymentInitError => _t('Payment initialization error', 'ଦେୟ ପ୍ରାରମ୍ଭ ତ୍ରୁଟି', 'भुगतान शुरुआत त्रुटि');
+  String get notifiedCustomer => _t('Notification sent to customer for payment.', 'ଦେୟ ପାଇଁ ଗ୍ରାହକଙ୍କୁ ବିଜ୍ଞପ୍ତି ପଠାଗଲା।', 'भुगतान के लिए ग्राहक को सूचना भेजी गई।');
+  String get notifyCustomerFailed => _t('Failed to notify customer.', 'ଗ୍ରାହକଙ୍କୁ ବିଜ୍ଞପ୍ତି ପଠାଇବାରେ ବିଫଳ।', 'ग्राहक को सूचित करने में विफल।');
+  String get duesRepayment => _t('Platform Dues Repayment', 'ପ୍ଲାଟଫର୍ମ ବକେୟା ପରିଶୋଧ', 'प्लेटफ़ॉर्म बकाया भुगतान');
+  String get selectUpiForPayment => _t('SELECT UPI APP FOR PAYMENT', 'ଦେୟ ପାଇଁ UPI ଆପ୍ ଚୟନ କରନ୍ତୁ', 'भुगतान के लिए UPI ऐप चुनें');
+  String get instantUpiPayment => _t('Instant UPI Payment', 'ତୁରନ୍ତ UPI ଦେୟ', 'तत्काल UPI भुगतान');
+  String get hideManualUpi => _t('Hide manual UPI ID', 'ମାନୁଆଲ୍ UPI ID ଲୁଚାନ୍ତୁ', 'मैनुअल UPI ID छिपाएं');
+  String get payUsingUpiVpa => _t('Or pay using UPI ID / VPA', 'କିମ୍ବା UPI ID / VPA ବ୍ୟବହାର କରି ଦେୟ ଦିଅନ୍ତୁ', 'या UPI ID / VPA का उपयोग करके भुगतान करें');
+  String get enterUpiHint => _t('Enter UPI ID (e.g. name@upi)', 'UPI ID ଦିଅନ୍ତୁ (ଯେପରି name@upi)', 'UPI ID दर्ज करें (जैसे name@upi)');
+  String get validUpiMsg => _t('Please enter a valid UPI ID (e.g. user@upi)', 'ଦୟାକରି ଏକ ବୈଧ UPI ID ଦିଅନ୍ତୁ (ଯେପରି user@upi)', 'कृपया एक मान्य UPI ID दर्ज करें (जैसे user@upi)');
+  String get payViaUpi => _t('Pay via UPI ID', 'UPI ID ମାଧ୍ୟମରେ ଦେୟ ଦିଅନ୍ତୁ', 'UPI ID के माध्यम से भुगतान करें');
+  String get encryptedPaymentFooter => _t('256-bit Encrypted Payment • Direct App Handoff', '256-ବିଟ୍ ଏନକ୍ରିପ୍ଟେଡ୍ ଦେୟ • ସିଧାସଳଖ ଆପ୍ ଦେୟ', '256-बिट एनक्रिप्टेड भुगतान • सीधा ऐप हैंडऑफ़');
+  String get confirmCashCollection => _t('Confirm Cash Collection', 'ନଗଦ ସଂଗ୍ରହ ନିଶ୍ଚିତ କରନ୍ତୁ', 'कैश संग्रह की पुष्टि करें');
+  String get totalCashToCollect => _t('Total Cash to Collect', 'ସଂଗ୍ରହ କରିବାକୁ ଥିବା ମୋଟ ନଗଦ', 'एकत्र करने के लिए कुल कैश');
+  String get notCollectedYet => _t('Not Collected Yet', 'ଏପର୍ଯ୍ୟନ୍ତ ସଂଗୃହିତ ହୋଇନାହିଁ', 'अभी तक एकत्र नहीं किया गया');
+  String get paymentNotReceived => _t('Payment Not Received', 'ଦେୟ ମିଳିନାହିଁ', 'भुगतान प्राप्त नहीं हुआ');
+  String get overrideMarkArrived => _t('Override & Mark Arrived', 'ଓଭରରାଇଡ୍ ଏବଂ ପହଞ୍ଚିଗଲି ଚିହ୍ନିତ କରନ୍ତୁ', 'ओवरराइड करें और पहुँच गए चिह्नित करें');
+  String get disputeRegistered => _t('Dispute Registered', 'ବିବାଦ ପଞ୍ଜୀକୃତ ହେଲା', 'विवाद पंजीकृत हो गया');
+  String get ok => _t('OK', 'ଠିକ୍ ଅଛି', 'ठीक है');
+  String get checkApprovalStatus => _t('Check Approval Status', 'ମଞ୍ଜୁରୀ ସ୍ଥିତି ଯାଞ୍ଚ କରନ୍ତୁ', 'स्वीकृति स्थिति जांचें');
+  String get submitDetails => _t('Submit Details', 'ବିବରଣୀ ଦାଖଲ କରନ୍ତୁ', 'विवरण जमा करें');
+  String get bikeCategory => _t('Two-Wheeler (Bike)', 'ଦୁଇ-ଚକିଆ (ବାଇକ୍)', 'दो-पहिया (बाइक)');
+  String get autoCategory => _t('Cargo 3-wheeler', 'କାର୍ଗୋ ୩-ଚକିଆ', 'कार्गो 3-पहिया');
+  String get miniTruckCategory => _t('Mini Truck (4-wheeler)', 'ମିନି ଟ୍ରକ୍ (୪-ଚକିଆ)', 'मिनी ट्रक (4-पहिया)');
+  String get lcvCategory => _t('Light Commercial Vehicle (4-wheeler)', 'ହାଲୁକା ବ୍ୟାବସାୟିକ ଗାଡ଼ି (୪-ଚକିଆ)', 'हल्का व्यावसायिक वाहन (4-पहिया)');
+
+  // Missing Tab & Status Getters
+  String get completed => _t('Completed', 'ସମ୍ପୂର୍ଣ୍ଣ', 'पूर्ण');
+  String get cancelled => _t('Cancelled', 'ବାତିଲ୍', 'रद्द');
+  String get navAccount => _t('Account', 'ଖାତା', 'खाता');
 }
 
 class VayaHttpOverrides extends HttpOverrides {
@@ -878,6 +925,30 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   bool _isLoading = false;
   String? _verificationId;
   String? _errorMsg;
+  int _resendCountdown = 0;
+  Timer? _resendTimer;
+  int? _resendToken;
+
+  @override
+  void dispose() {
+    _resendTimer?.cancel();
+    _phoneController.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  void _startResendTimer() {
+    _resendTimer?.cancel();
+    setState(() => _resendCountdown = 30);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_resendCountdown <= 1) {
+        timer.cancel();
+        if (mounted) setState(() => _resendCountdown = 0);
+      } else {
+        if (mounted) setState(() => _resendCountdown--);
+      }
+    });
+  }
 
   Future<void> _sendOtpCode() async {
     if (_phoneController.text.length != 10) {
@@ -895,6 +966,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: formattedPhone,
+        forceResendingToken: _resendToken,
         verificationCompleted: (PhoneAuthCredential credential) async {
           await _auth.signInWithCredential(credential);
           _checkProfileAndNavigate();
@@ -910,7 +982,10 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
             _isLoading = false;
             _otpSent = true;
             _verificationId = verificationId;
+            _resendToken = resendToken;
           });
+          _otpController.clear();
+          _startResendTimer();
         },
         codeAutoRetrievalTimeout: (String verificationId) {
           _verificationId = verificationId;
@@ -1080,6 +1155,23 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                   ? const VayaLoader.inline(size: 24, color: Colors.white)
                   : Text(_otpSent ? 'Verify OTP' : 'Send OTP Code'),
             ),
+            if (_otpSent) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: TextButton(
+                  onPressed: _resendCountdown > 0 || _isLoading ? null : _sendOtpCode,
+                  child: Text(
+                    _resendCountdown > 0
+                        ? 'Resend OTP in ${_resendCountdown}s'
+                        : 'Resend OTP',
+                    style: TextStyle(
+                      color: _resendCountdown > 0 ? Colors.grey : VayaDriverTheme.saffron,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1188,12 +1280,12 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
               onPressed: _isChecking ? null : _checkStatus,
               child: _isChecking
                   ? const VayaLoader.inline(size: 20, color: Colors.white)
-                  : const Text('Check Approval Status'),
+                  : Text(LocalizedPartnerStrings.of(context).checkApprovalStatus),
             ),
             const SizedBox(height: 12),
             TextButton(
               onPressed: _signOut,
-              child: const Text('Sign Out', style: TextStyle(color: VayaDriverTheme.signalCream)),
+              child: Text(LocalizedPartnerStrings.of(context).signOut, style: const TextStyle(color: VayaDriverTheme.signalCream)),
             ),
           ],
         ),
@@ -1317,7 +1409,7 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                         children: [
                           SizedBox(width: 24, height: 24, child: VehicleIconHelper.getVehicleSvgWidget('bike')),
                           const SizedBox(width: 10),
-                          const Text('Two-Wheeler (Bike)'),
+                          Text(LocalizedPartnerStrings.of(context).bikeCategory),
                         ],
                       ),
                     ),
@@ -1327,7 +1419,7 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                         children: [
                           SizedBox(width: 24, height: 24, child: VehicleIconHelper.getVehicleSvgWidget('three_wheeler')),
                           const SizedBox(width: 10),
-                          const Text('Cargo 3-wheeler'),
+                          Text(LocalizedPartnerStrings.of(context).autoCategory),
                         ],
                       ),
                     ),
@@ -1337,7 +1429,7 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                         children: [
                           SizedBox(width: 24, height: 24, child: VehicleIconHelper.getVehicleSvgWidget('ace')),
                           const SizedBox(width: 10),
-                          const Text('Mini Truck (4-wheeler)'),
+                          Text(LocalizedPartnerStrings.of(context).miniTruckCategory),
                         ],
                       ),
                     ),
@@ -1347,7 +1439,7 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                         children: [
                           SizedBox(width: 24, height: 24, child: VehicleIconHelper.getVehicleSvgWidget('truck')),
                           const SizedBox(width: 10),
-                          const Text('Light Commercial Vehicle (4-wheeler)'),
+                          Text(LocalizedPartnerStrings.of(context).lcvCategory),
                         ],
                       ),
                     ),
@@ -1370,7 +1462,7 @@ class _DriverOnboardingScreenState extends State<DriverOnboardingScreen> {
                   onPressed: _isLoading ? null : _submitRegistration,
                   child: _isLoading
                       ? const VayaLoader.inline(size: 20, color: Colors.white)
-                      : const Text('Submit Details'),
+                      : Text(LocalizedPartnerStrings.of(context).submitDetails),
                 ),
               ],
             ),
@@ -6350,6 +6442,7 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
 
   @override
   Widget build(BuildContext context) {
+    final dl = LocalizedPartnerStrings.of(context);
     final completedTrips = _trips.where((t) => t['status'] == 'completed').toList();
     final cancelledTrips = _trips.where((t) => t['status'] == 'cancelled').toList();
 
@@ -6358,9 +6451,9 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
       appBar: AppBar(
         backgroundColor: VayaDriverTheme.inkBlack,
         elevation: 0,
-        title: const Text(
-          'Trip History',
-          style: TextStyle(
+        title: Text(
+          dl.tripHistory,
+          style: const TextStyle(
             fontFamily: 'Outfit',
             fontSize: 28, // Reduced to 28-32 px range
             fontWeight: FontWeight.w700,
@@ -6391,9 +6484,9 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> with TickerProvid
           unselectedLabelColor: const Color(0xFF8E8C85),
           indicatorSize: TabBarIndicatorSize.tab,
           dividerColor: Colors.transparent, // Heavy divider line REMOVED
-          tabs: const [
-            Tab(text: 'Completed'),
-            Tab(text: 'Cancelled'),
+          tabs: [
+            Tab(text: dl.completed),
+            Tab(text: dl.cancelled),
           ],
         ),
       ),
@@ -9791,6 +9884,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
 
               _buildLanguageOption(
                 ctx: ctx,
+                parentCtx: context,
                 code: 'en',
                 title: 'English',
                 subtitle: 'Default language',
@@ -9800,6 +9894,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
 
               _buildLanguageOption(
                 ctx: ctx,
+                parentCtx: context,
                 code: 'or',
                 title: 'ଓଡ଼ିଆ (Odia)',
                 subtitle: 'ଅଫିସିଆଲ ଭାଷା',
@@ -9809,6 +9904,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
 
               _buildLanguageOption(
                 ctx: ctx,
+                parentCtx: context,
                 code: 'hi',
                 title: 'हिन्दी (Hindi)',
                 subtitle: 'राष्ट्र भाषा',
@@ -9824,6 +9920,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
 
   Widget _buildLanguageOption({
     required BuildContext ctx,
+    required BuildContext parentCtx,
     required String code,
     required String title,
     required String subtitle,
@@ -9847,8 +9944,8 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
           ? const Icon(Icons.check_circle_rounded, color: VayaDriverTheme.saffron, size: 22)
           : const Icon(Icons.radio_button_unchecked, color: VayaDriverTheme.slate, size: 22),
       onTap: () async {
-        Navigator.pop(ctx);
-        (ctx.findAncestorStateOfType<State>() as dynamic)?.setLocale(Locale(code));
+        if (ctx.mounted) Navigator.pop(ctx);
+        parentCtx.findAncestorStateOfType<_VayaPartnerAppState>()?.setLocale(Locale(code));
         await _saveDriverProfileToDb({'appLanguage': title});
         _showSuccessConfirmation('Language updated to $title and saved to database');
       },
@@ -10637,9 +10734,9 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
         elevation: 0,
         centerTitle: false,
         titleSpacing: 18,
-        title: const Text(
-          'Account',
-          style: TextStyle(
+        title: Text(
+          dl.navAccount,
+          style: const TextStyle(
             fontFamily: 'General Sans',
             fontSize: 30,
             fontWeight: FontWeight.w700,

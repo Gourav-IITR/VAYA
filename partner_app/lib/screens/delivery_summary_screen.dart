@@ -259,7 +259,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Go back', style: TextStyle(fontFamily: 'Inter', color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600)),
+            child: Text(LocalizedPartnerStrings.of(context).goBack, style: const TextStyle(fontFamily: 'Inter', color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -268,7 +268,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text('Confirm ₹$amountStr collected', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold)),
+            child: Text('${LocalizedPartnerStrings.of(context).confirmCollected} ₹$amountStr', style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -412,11 +412,11 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1B),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Color(0xFFF39C12), size: 24),
-            SizedBox(width: 10),
-            Text('Fare updated', style: TextStyle(fontFamily: 'General Sans', fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFF39C12), size: 24),
+            const SizedBox(width: 10),
+            Text(LocalizedPartnerStrings.of(context).fareUpdated, style: const TextStyle(fontFamily: 'General Sans', fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
           ],
         ),
         content: const Text(
@@ -438,7 +438,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
               });
               _fetchSettlementSummary(isRefresh: true);
             },
-            child: const Text('Review updated fare', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold)),
+            child: Text(LocalizedPartnerStrings.of(context).reviewUpdatedFare, style: const TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -544,7 +544,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
                   Navigator.of(ctx).pop();
                   widget.onCompleted();
                 },
-                child: const Text('Done', style: TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold)),
+                child: Text(LocalizedPartnerStrings.of(context).done, style: const TextStyle(fontFamily: 'Inter', fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ),
             const SizedBox(height: 12),
@@ -561,7 +561,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
                       Navigator.of(ctx).pop();
                       widget.onViewTripDetails();
                     },
-                    child: const Text('View trip details', style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
+                    child: Text(LocalizedPartnerStrings.of(context).viewTripDetails, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -576,7 +576,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
                       Navigator.of(ctx).pop();
                       widget.onReportIssue();
                     },
-                    child: const Text('Report fare issue', style: TextStyle(fontFamily: 'Inter', fontSize: 13, color: Color(0xFFE74C3C), fontWeight: FontWeight.w600)),
+                    child: Text(LocalizedPartnerStrings.of(context).reportFareIssue, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Color(0xFFE74C3C), fontWeight: FontWeight.w600)),
                   ),
                 ),
               ],
@@ -657,25 +657,25 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: VayaDriverTheme.routeGreen.withValues(alpha: 0.5)),
             ),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircleAvatar(radius: 3, backgroundColor: VayaDriverTheme.routeGreen),
-                SizedBox(width: 6),
-                Text('At drop-off', style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold)),
+                const CircleAvatar(radius: 3, backgroundColor: VayaDriverTheme.routeGreen),
+                const SizedBox(width: 6),
+                Text(LocalizedPartnerStrings.of(context).atDropoff, style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: VayaDriverTheme.routeGreen, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  VayaLoader.inline(size: 36, color: VayaDriverTheme.saffron),
-                  SizedBox(height: 16),
-                  Text('Loading settlement summary...', style: TextStyle(fontFamily: 'Inter', color: Color(0xFF9CA3AF), fontSize: 14)),
+                  const VayaLoader.inline(size: 36, color: VayaDriverTheme.saffron),
+                  const SizedBox(height: 16),
+                  Text(LocalizedPartnerStrings.of(context).loadingSettlement, style: const TextStyle(fontFamily: 'Inter', color: Color(0xFF9CA3AF), fontSize: 14)),
                 ],
               ),
             )
@@ -697,7 +697,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
                           ),
                           onPressed: () => _fetchSettlementSummary(),
                           icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('Retry Server Fetch'),
+                          label: Text(LocalizedPartnerStrings.of(context).retryServerFetch),
                         ),
                         const SizedBox(height: 12),
                         OutlinedButton.icon(
@@ -715,13 +715,13 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
                             });
                           },
                           icon: const Icon(Icons.calculate_outlined, color: Color(0xFFF39C12), size: 18),
-                          label: const Text('Use Local Settlement & Enter OTP', style: TextStyle(color: Color(0xFFF39C12), fontFamily: 'Inter', fontWeight: FontWeight.bold)),
+                          label: Text(LocalizedPartnerStrings.of(context).useLocalSettlement, style: const TextStyle(color: Color(0xFFF39C12), fontFamily: 'Inter', fontWeight: FontWeight.bold)),
                         ),
                         const SizedBox(height: 8),
                         TextButton.icon(
                           onPressed: widget.onCompleted,
                           icon: const Icon(Icons.sync_rounded, size: 16, color: Color(0xFF9CA3AF)),
-                          label: const Text('Sync / Refresh Active Trip', style: TextStyle(color: Color(0xFF9CA3AF), fontFamily: 'Inter', fontSize: 13)),
+                          label: Text(LocalizedPartnerStrings.of(context).syncActiveTrip, style: const TextStyle(color: Color(0xFF9CA3AF), fontFamily: 'Inter', fontSize: 13)),
                         ),
                       ],
                     ),
@@ -868,7 +868,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
           const SizedBox(height: 12),
 
           // Pickup Waiting
-          const Text('Pickup waiting', style: TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+          Text(LocalizedPartnerStrings.of(context).pickupWaiting, style: const TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 2),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -886,7 +886,7 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
           const SizedBox(height: 12),
 
           // Drop-off Waiting
-          const Text('Drop-off waiting', style: TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+          Text(LocalizedPartnerStrings.of(context).dropoffWaiting, style: const TextStyle(fontFamily: 'Inter', fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 2),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

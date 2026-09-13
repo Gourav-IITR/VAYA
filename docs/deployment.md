@@ -102,4 +102,32 @@ Vite generates static assets that can be hosted for free on Firebase Hosting.
    ```bash
    firebase deploy --only hosting --project [YOUR_PROJECT_ID]
    ```
-5. Firebase will output your live URLs (e.g. `https://vaya.web.app`, `https://vaya-admin.web.app`, `https://vaya-customer-app.web.app`, and `https://vaya-partner-app.web.app`).
+5. Firebase will output your default `.web.app` URLs (`https://goods-delivery-platform.web.app`, `https://vaya-logistics-admin.web.app`, `https://vaya-customer-app.web.app`, and `https://vaya-partner-app.web.app`).
+
+---
+
+## 4. Custom Domain Setup (`vayadelivery.com`)
+
+To bind `vayadelivery.com` and its subdomains to your deployed Firebase Hosting sites:
+
+### A. Firebase Console Custom Domain Registration
+1. In Firebase Console, go to **Build** → **Hosting**.
+2. Select each site from the dropdown and click **Add Custom Domain**:
+   - **`goods-delivery-platform`**: Add `vayadelivery.com` and `www.vayadelivery.com`
+   - **`vaya-customer-app`**: Add `app.vayadelivery.com` (and optionally `customer.vayadelivery.com`)
+   - **`vaya-partner-app`**: Add `partner.vayadelivery.com`
+   - **`vaya-logistics-admin`**: Add `admin.vayadelivery.com`
+
+### B. DNS Record Mapping Table (Domain Registrar: GoDaddy / Namecheap / Cloudflare)
+Add the following DNS records in your domain manager:
+
+| Type | Host / Subdomain | Target Value / Destination | Notes |
+|---|---|---|---|
+| **A** | `@` | Firebase IP 1 (provided in Console) | Points `vayadelivery.com` root to Landing Page |
+| **A** | `@` | Firebase IP 2 (provided in Console) | Secondary IP for redundancy |
+| **CNAME** | `www` | `goods-delivery-platform.web.app` | Redirects `www.vayadelivery.com` to root landing page |
+| **CNAME** | `app` | `vaya-customer-app.web.app` | Maps `app.vayadelivery.com` to Customer Web App |
+| **CNAME** | `partner` | `vaya-partner-app.web.app` | Maps `partner.vayadelivery.com` to Driver Partner Web App |
+| **CNAME** | `admin` | `vaya-logistics-admin.web.app` | Maps `admin.vayadelivery.com` to Admin Operations Portal |
+
+*SSL Certificate provisioning is automatic via Let's Encrypt once DNS records propagate (typically 5 - 30 minutes).*

@@ -14,6 +14,10 @@ import {
   Compass
 } from 'lucide-react';
 
+const CUSTOMER_APP_URL = 'https://app.vayadelivery.com';
+const PARTNER_APP_URL = 'https://partner.vayadelivery.com';
+const ADMIN_PORTAL_URL = 'https://admin.vayadelivery.com';
+
 export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [trackBookingId, setTrackBookingId] = useState('');
@@ -55,7 +59,9 @@ export default function App() {
             <a href="#drivers">Drivers</a>
             <a href="#vehicles">Vehicles</a>
             <a href="#track">Track</a>
-            <a href="#book" className="nav-cta">Book a VAYA</a>
+            <a href={PARTNER_APP_URL} target="_blank" rel="noopener noreferrer">Driver App</a>
+            <a href={ADMIN_PORTAL_URL} target="_blank" rel="noopener noreferrer">Admin Portal</a>
+            <a href={CUSTOMER_APP_URL} className="nav-cta">Book a VAYA</a>
           </nav>
 
           {/* Mobile Menu Toggle */}
@@ -88,7 +94,9 @@ export default function App() {
             <a href="#drivers" onClick={() => setMobileMenuOpen(false)} style={{ textDecoration: 'none', color: 'var(--slate)', fontWeight: 600 }}>Drivers</a>
             <a href="#vehicles" onClick={() => setMobileMenuOpen(false)} style={{ textDecoration: 'none', color: 'var(--slate)', fontWeight: 600 }}>Vehicles</a>
             <a href="#track" onClick={() => setMobileMenuOpen(false)} style={{ textDecoration: 'none', color: 'var(--slate)', fontWeight: 600 }}>Track Delivery</a>
-            <a href="#book" onClick={() => setMobileMenuOpen(false)} className="nav-cta" style={{ textAlign: 'center' }}>Book a VAYA</a>
+            <a href={PARTNER_APP_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} style={{ textDecoration: 'none', color: 'var(--slate)', fontWeight: 600 }}>Driver Partner App</a>
+            <a href={ADMIN_PORTAL_URL} target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} style={{ textDecoration: 'none', color: 'var(--slate)', fontWeight: 600 }}>Admin Portal</a>
+            <a href={CUSTOMER_APP_URL} onClick={() => setMobileMenuOpen(false)} className="nav-cta" style={{ textAlign: 'center' }}>Book a VAYA</a>
           </div>
         )}
       </header>
@@ -107,7 +115,8 @@ export default function App() {
               Move anything across the city, bike to mini-truck, upfront-priced and live-tracked.
             </p>
             <div className="hero-ctas">
-              <a href="#book" className="btn-primary">Book a VAYA</a>
+              <a href={CUSTOMER_APP_URL} className="btn-primary">Book a VAYA</a>
+              <a href={PARTNER_APP_URL} target="_blank" rel="noopener noreferrer" className="btn-secondary">Driver App</a>
               <a href="#business" className="btn-secondary">For business</a>
             </div>
           </div>
@@ -324,7 +333,7 @@ export default function App() {
               </p>
             </div>
             <div>
-              <a href="#register" className="btn-secondary" style={{ borderColor: 'white', color: 'white' }}>
+              <a href={PARTNER_APP_URL} target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{ borderColor: 'white', color: 'white' }}>
                 Join as Driver
               </a>
             </div>
@@ -350,6 +359,15 @@ export default function App() {
             <p className="footer-tagline">
               Your vehicle. At your address. In minutes.
             </p>
+          </div>
+
+          <div className="footer-column">
+            <h4>PLATFORM APPS</h4>
+            <ul>
+              <li><a href={CUSTOMER_APP_URL}>Customer Web App</a></li>
+              <li><a href={PARTNER_APP_URL} target="_blank" rel="noopener noreferrer">Driver Partner App</a></li>
+              <li><a href={ADMIN_PORTAL_URL} target="_blank" rel="noopener noreferrer">Admin Operations Portal</a></li>
+            </ul>
           </div>
 
           <div className="footer-column">

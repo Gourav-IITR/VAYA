@@ -44,7 +44,20 @@ app.use(express.json({
 // Audit fix Medium #1: removed the `NODE_ENV === 'development'` short-circuit
 // which allowed every origin when the env var was not set (the default in Cloud Run).
 // Use the explicit CORS_DEV_BYPASS=true env var in local dev if a wildcard is needed.
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*').split(',').map(o => o.trim()).filter(Boolean);
+const defaultAllowedOrigins = [
+  'https://vayadelivery.com',
+  'https://www.vayadelivery.com',
+  'https://app.vayadelivery.com',
+  'https://customer.vayadelivery.com',
+  'https://partner.vayadelivery.com',
+  'https://admin.vayadelivery.com',
+  'https://goods-delivery-platform.web.app',
+  'https://vaya-customer-app.web.app',
+  'https://vaya-partner-app.web.app',
+  'https://vaya-logistics-admin.web.app'
+];
+const envOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean) : [];
+const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultAllowedOrigins;
 const corsDevBypass = process.env.CORS_DEV_BYPASS === 'true';
 app.use(cors({
   origin: (origin, callback) => {

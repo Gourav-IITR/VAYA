@@ -151,10 +151,10 @@ class CustomerAuthHelper {
     } catch (_) {}
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Session expired. Please log in with your mobile number.'),
+        SnackBar(
+          content: Text(LocalizedStrings.of(context).sessionExpired),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 4),
+          duration: const Duration(seconds: 4),
         ),
       );
       Navigator.pushAndRemoveUntil(
@@ -245,19 +245,19 @@ Future<Map<String, String>?> _pickPhoneContact(BuildContext context) async {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Contacts Permission Required', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.bold)),
-            content: const Text('VAYA needs contacts permission to help you pick a contact. Please enable it in the app settings.'),
+            title: Text(LocalizedStrings.of(context).contactsPermissionTitle, style: const TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.bold)),
+            content: Text(LocalizedStrings.of(context).contactsPermissionMsg),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel', style: TextStyle(color: VayaTheme.slate)),
+                child: Text(LocalizedStrings.of(context).cancel, style: const TextStyle(color: VayaTheme.slate)),
               ),
               TextButton(
                 onPressed: () async {
                   Navigator.pop(ctx);
                   await Geolocator.openAppSettings();
                 },
-                child: const Text('Open settings', style: TextStyle(color: VayaTheme.saffron, fontWeight: FontWeight.bold)),
+                child: Text(LocalizedStrings.of(context).openSettings, style: const TextStyle(color: VayaTheme.saffron, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -602,6 +602,7 @@ class VayaTheme {
   static ThemeData themeData = ThemeData(
     useMaterial3: true,
     fontFamily: 'Inter',
+    fontFamilyFallback: const ['Noto Sans', 'Roboto', 'sans-serif'],
     scaffoldBackgroundColor: signalCream,
     colorScheme: const ColorScheme.light(
       primary: saffron,
@@ -992,6 +993,9 @@ class LocalizedStrings {
   String get enterMobile => _t('Enter 10-digit Mobile Number', '୧୦-ଅଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ଦିଅନ୍ତୁ', '10-अंकीय मोबाइल नंबर दर्ज करें');
   String get sendOtp => _t('Send OTP', 'OTP ପଠାନ୍ତୁ', 'ओटीपी भेजें');
   String get verifyOtp => _t('Verify OTP', 'OTP ଯାଞ୍ଚ କରନ୍ତୁ', 'ओटीपी सत्यापित करें');
+  String get enterOtpCode => _t('Enter OTP Code', 'OTP କୋଡ୍ ଦିଅନ୍ତୁ', 'OTP कोड दर्ज करें');
+  String get resendOtp => _t('Resend OTP', 'OTP ପୁନଃପଠାନ୍ତୁ', 'OTP पुनः भेजें');
+  String resendOtpIn(int sec) => _t('Resend OTP in ${sec}s', '${sec}ସେ. ରେ OTP ପୁନଃପଠାନ୍ତୁ', '${sec}से. में OTP पुनः भेजें');
 
   // Home
   String get whereToPickup => _t('Where to pick up?', 'କେଉଁଠୁ ଉଠାଇବେ?', 'कहाँ से उठाना है?');
@@ -1075,6 +1079,7 @@ class LocalizedStrings {
   String get privacyAndLegal => _t('Privacy & legal', 'ଗୋପନୀୟତା ଏବଂ ଆଇନ', 'गोपनीयता और कानूनी');
   String get privacyPolicy => _t('Privacy policy & terms', 'ଗୋପନୀୟତା ନୀତି ଏବଂ ସର୍ତ୍ତାବଳୀ', 'गोपनीयता नीति और शर्तें');
   String get downloadMyData => _t('Download my data', 'ମୋ ଡାଟା ଡାଉନଲୋଡ୍', 'मेरा डेटा डाउनलोड करें');
+  String get deleteAccount => _t('Delete account', 'ଆକାଉଣ୍ଟ୍ ଡିଲିଟ୍ କରନ୍ତୁ', 'खाता हटाएँ');
   String get signOut => _t('Sign out', 'ସାଇନ୍ ଆଉଟ୍', 'साइन आउट');
   String get signOutConfirm => _t('Sign out of VAYA?', 'VAYA ରୁ ସାଇନ୍ ଆଉଟ୍ କରିବେ?', 'VAYA से साइन आउट करें?');
   String get chooseLanguage => _t('Choose language', 'ଭାଷା ଚୟନ କରନ୍ତୁ', 'भाषा चुनें');
@@ -1099,6 +1104,48 @@ class LocalizedStrings {
   String get totalAmount => _t('Total Amount', 'ମୋଟ ରାଶି', 'कुल राशि');
   String get confirmAndBook => _t('Confirm & Book Now', 'ନିଶ୍ଚିତ କରନ୍ତୁ ଏବଂ ବୁକ୍ କରନ୍ତୁ', 'पुष्टि करें और अभी बुक करें');
   String get subheadingDeliver => _t('Reliable Intra-city Logistics', 'ବିଶ୍ୱସନୀୟ ଆନ୍ତଃସହର ଲଜିଷ୍ଟିକ୍ସ', 'विश्वसनीय अंतर-शहर रसद');
+
+  // Additional Audited UI Keys
+  String get sessionExpired => _t('Session expired. Please log in with your mobile number.', 'ସେସନ୍ ସମାପ୍ତ ହୋଇଛି। ଦୟାକରି ଆପଣଙ୍କ ମୋବାଇଲ୍ ନମ୍ବର ସହ ଲଗ୍ ଇନ୍ କରନ୍ତୁ।', 'सत्र समाप्त हो गया है। कृपया अपने मोबाइल नंबर से लॉगिन करें।');
+  String get contactsPermissionTitle => _t('Contacts Permission Required', 'ସମ୍ପର୍କ ଅନୁମତି ଆବଶ୍ୟକ', 'संपर्क अनुमति आवश्यक है');
+  String get contactsPermissionMsg => _t('VAYA needs contacts permission to help you pick a contact. Please enable it in the app settings.', 'ଆପଣଙ୍କୁ କଣ୍ଟାକ୍ଟ ଚୟନ କରିବାରେ ସାହାଯ୍ୟ କରିବା ପାଇଁ VAYA ର କଣ୍ଟାକ୍ଟ ଅନୁମତି ଆବଶ୍ୟକ। ଦୟାକରି ଆପ୍ ସେଟିଂସରେ ଏହାକୁ ସକ୍ଷମ କରନ୍ତୁ।', 'संपर्क चुनने में मदद के लिए VAYA को संपर्क अनुमति की आवश्यकता है। कृपया ऐप सेटिंग्स में इसे सक्षम करें।');
+  String get openSettings => _t('Open Settings', 'ସେଟିଂସ ଖୋଲନ୍ତୁ', 'सेटिंग्स खोलें');
+  String get completeProfile => _t('Complete Profile', 'ପ୍ରୋଫାଇଲ୍ ପୂରଣ କରନ୍ତୁ', 'प्रोफ़ाइल पूरी करें');
+  String get saveAndContinue => _t('Save & Continue', 'ସେଭ୍ କରନ୍ତୁ ଏବଂ ଆଗକୁ ବଢ଼ନ୍ତୁ', 'सहेजें और आगे बढ़ें');
+  String get cargoGeneral => _t('General Packages & Boxes', 'ସାଧାରଣ ପ୍ୟାକେଜ୍ ଏବଂ ବାକ୍ସ', 'सामान्य पैकेज और बक्से');
+  String get cargoElectronics => _t('Electronics & Appliances', 'ଇଲେକ୍ଟ୍ରୋନିକ୍ସ ଏବଂ ଉପକରଣ', 'इलेक्ट्रॉनिक्स और उपकरण');
+  String get cargoFurniture => _t('Furniture & Home Goods', 'ଫର୍ନିଚର ଏବଂ ଘରୋଇ ସାମଗ୍ରୀ', 'फ़र्नीचर और घरेलू सामान');
+  String get cargoFmcg => _t('Groceries / FMCG Products', 'ଗ୍ରୋସରୀ / FMCG ସାମଗ୍ରୀ', 'किराना / एफएमसीजी उत्पाद');
+  String get cargoHardware => _t('Hardware / Construction Goods', 'ହାଡ଼ୱେୟାର୍ / ନିର୍ମାଣ ସାମଗ୍ରୀ', 'हार्डवेयर / निर्माण सामग्री');
+  String get cargoFragile => _t('Fragile / Glassware', 'କାଚ / ଭାଙ୍ଗିଯିବା ଭଳି ସାମଗ୍ରୀ', 'काँच / टूटने योग्य सामान');
+  String get itemType => _t('1. Item Type', '୧. ସାମଗ୍ରୀ ପ୍ରକାର', '1. सामान का प्रकार');
+  String get estimatedWeight => _t('2. Estimated Total Weight', '୨. ଅନୁମାନିତ ମୋଟ ଓଜନ', '2. अनुमानित कुल वजन');
+  String get largestSize => _t('3. Largest Item Size', '୩. ସବୁଠୁ ବଡ଼ ସାମଗ୍ରୀ ଆକାର', '3. सबसे बड़े सामान का आकार');
+  String get setDeliveryRoute => _t('Set Delivery Route', 'ଡେଲିଭରୀ ରୁଟ୍ ଚୟନ କରନ୍ତୁ', 'डिलीवरी रूट सेट करें');
+  String get refreshFare => _t('Refresh fare', 'ଭଡ଼ା ପୁନଃସେଟ୍ କରନ୍ତୁ', 'किराया रीफ़्रेश करें');
+  String get fareDisclaimer => _t('* Final fare may vary due to route changes, tolls, or wait times.', '* ରୁଟ୍ ପରିବର୍ତ୍ତନ, ଟୋଲ୍ କିମ୍ବା ଅପେକ୍ଷା ସମୟ କାରଣରୁ ଚୂଡ଼ାନ୍ତ ଭଡ଼ା ଭିନ୍ନ ହୋଇପାରେ।', '* रूट परिवर्तन, टोल या प्रतीक्षा समय के कारण अंतिम किराया भिन्न हो सकता है।');
+  String get cancellationPolicy => _t('Cancellation policy', 'ବାତିଲ୍ ନୀତି', 'रद्दीकरण नीति');
+  String get transitInsurance => _t('Transit insurance', 'ପରିବହନ ବୀମା', 'परिवहन बीमा');
+  String get switchVehicle => _t('Switch Vehicle', 'ଗାଡ଼ି ପରିବର୍ତ୍ତନ କରନ୍ତୁ', 'वाहन बदलें');
+  String get bike => _t('Bike (2-Wheeler)', 'ବାଇକ୍ (୨-ଚକିଆ)', 'बाइक (2-पहिया)');
+  String get bikeSubtitle => _t('Fastest for small items', 'ସାନ ସାମଗ୍ରୀ ପାଇଁ ଦ୍ରୁତତମ', 'छोटे सामान के लिए सबसे तेज़');
+  String get autoTitle => _t('Auto (3-Wheeler)', 'ଅଟୋ (୩-ଚକିଆ)', 'ऑटो (3-पहिया)');
+  String get autoSubtitle => _t('Ideal for medium loads', 'ମଧ୍ୟମ ଭାର ପାଇଁ ଉପଯୁକ୍ତ', 'मध्यम भार के लिए उपयुक्त');
+  String get pickupTruckTitle => _t('Pickup Truck', 'ପିକଅପ୍ ଟ୍ରକ୍', 'पिकअप ट्रक');
+  String get pickupTruckSubtitle => _t('For heavy/bulk cargo', 'ଭାରୀ / ଅଧିକ ସାମଗ୍ରୀ ପାଇଁ', 'भारी / अधिक सामान के लिए');
+  String get bookingCancelledSuccess => _t('Booking cancelled successfully.', 'ବୁକିଂ ସଫଳତାର ସହ ବାତିଲ୍ ହେଲା।', 'बुकिंग सफलतापूर्वक रद्द कर दी गई।');
+  String get paymentInitError => _t('Payment initialization error', 'ଦେୟ ପ୍ରାରମ୍ଭ ତ୍ରୁଟି', 'भुगतान शुरुआत त्रुटि');
+  String get deliveryFarePayment => _t('Delivery Fare Payment', 'ଡେଲିଭରୀ ଭଡ଼ା ଦେୟ', 'डिलीवरी किराया भुगतान');
+  String get duesRepayment => _t('Dues Repayment', 'ବକେୟା ପରିଶୋଧ', 'बकाया भुगतान');
+  String get walletTopup => _t('Wallet Top-up', 'ୱାଲେଟ୍ ଟପ୍-ଅପ୍', 'वॉलेट टॉप-अप');
+  String get selectUpiApp => _t('SELECT UPI APP', 'UPI ଆପ୍ ଚୟନ କରନ୍ତୁ', 'UPI ऐप चुनें');
+  String get instantUpiPayment => _t('Instant UPI Payment', 'ତୁରନ୍ତ UPI ଦେୟ', 'तत्काल UPI भुगतान');
+  String get hideManualUpi => _t('Hide manual UPI ID', 'ମାନୁଆଲ୍ UPI ID ଲୁଚାନ୍ତୁ', 'मैनुअल UPI ID छिपाएं');
+  String get payUsingUpiVpa => _t('Or pay using UPI ID / VPA', 'କିମ୍ବା UPI ID / VPA ବ୍ୟବହାର କରି ଦେୟ ଦିଅନ୍ତୁ', 'या UPI ID / VPA का उपयोग करके भुगतान करें');
+  String get enterUpiHint => _t('Enter UPI ID (e.g. name@upi)', 'UPI ID ଦିଅନ୍ତୁ (ଯେପରି name@upi)', 'UPI ID दर्ज करें (जैसे name@upi)');
+  String get validUpiMsg => _t('Please enter a valid UPI ID (e.g. user@upi)', 'ଦୟାକରି ଏକ ବୈଧ UPI ID ଦିଅନ୍ତୁ (ଯେପରି user@upi)', 'कृपया एक मान्य UPI ID दर्ज करें (जैसे user@upi)');
+  String get payViaUpi => _t('Pay via UPI ID', 'UPI ID ମାଧ୍ୟମରେ ଦେୟ ଦିଅନ୍ତୁ', 'UPI ID के माध्यम से भुगतान करें');
+  String get securedByRazorpay => _t('Secured by Razorpay • Direct App Handoff', 'Razorpay ଦ୍ୱାରା ସୁରକ୍ଷିତ • ସିଧାସଳଖ ଆପ୍ ଦେୟ', 'Razorpay द्वारा सुरक्षित • सीधा ऐप हैंडऑफ़');
 }
 
 /// 1. Language Picker Screen
@@ -1198,6 +1245,30 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _verificationId;
   String? _errorMsg;
+  int _resendCountdown = 0;
+  Timer? _resendTimer;
+  int? _resendToken;
+
+  @override
+  void dispose() {
+    _resendTimer?.cancel();
+    _phoneController.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  void _startResendTimer() {
+    _resendTimer?.cancel();
+    setState(() => _resendCountdown = 30);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_resendCountdown <= 1) {
+        timer.cancel();
+        if (mounted) setState(() => _resendCountdown = 0);
+      } else {
+        if (mounted) setState(() => _resendCountdown--);
+      }
+    });
+  }
 
   Future<void> _sendOtpCode() async {
     if (_phoneController.text.length != 10) {
@@ -1215,6 +1286,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: formattedPhone,
+        forceResendingToken: _resendToken,
         verificationCompleted: (PhoneAuthCredential credential) async {
           await _auth.signInWithCredential(credential);
           _checkProfileAndNavigate();
@@ -1230,7 +1302,10 @@ class _LoginScreenState extends State<LoginScreen> {
             _isLoading = false;
             _otpSent = true;
             _verificationId = verificationId;
+            _resendToken = resendToken;
           });
+          _otpController.clear();
+          _startResendTimer();
         },
         codeAutoRetrievalTimeout: (String verificationId) {
           _verificationId = verificationId;
@@ -1358,8 +1433,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 maxLength: 6,
                 style: const TextStyle(color: VayaTheme.inkBlack, fontWeight: FontWeight.bold, letterSpacing: 8),
                 textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                  labelText: 'Enter OTP Code',
+                decoration: InputDecoration(
+                  labelText: str.enterOtpCode,
                 ),
               ),
             if (_errorMsg != null) ...[
@@ -1373,6 +1448,23 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? const VayaLoader.inline(size: 24, color: Colors.white)
                   : Text(_otpSent ? str.verifyOtp : str.sendOtp),
             ),
+            if (_otpSent) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: TextButton(
+                  onPressed: _resendCountdown > 0 || _isLoading ? null : _sendOtpCode,
+                  child: Text(
+                    _resendCountdown > 0
+                        ? str.resendOtpIn(_resendCountdown)
+                        : str.resendOtp,
+                    style: TextStyle(
+                      color: _resendCountdown > 0 ? Colors.grey : VayaTheme.vayaOrange,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1690,6 +1782,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final str = LocalizedStrings.of(context);
     final List<Widget> pages = [
       HomeScreen(
         activeBooking: _activeBooking,
@@ -1758,10 +1851,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontSize: 12),
         items: [
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home, color: VayaTheme.saffron),
-            label: 'Home',
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.home_outlined),
+            activeIcon: const Icon(Icons.home, color: VayaTheme.saffron),
+            label: str.navHome,
           ),
           BottomNavigationBarItem(
             icon: Stack(
@@ -1783,17 +1876,17 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               ],
             ),
             activeIcon: const Icon(Icons.receipt_long, color: VayaTheme.saffron),
-            label: 'Orders',
+            label: str.navOrders,
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.account_balance_wallet_outlined),
-            activeIcon: Icon(Icons.account_balance_wallet, color: VayaTheme.saffron),
-            label: 'Payments',
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            activeIcon: const Icon(Icons.account_balance_wallet, color: VayaTheme.saffron),
+            label: str.navPayments,
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person, color: VayaTheme.saffron),
-            label: 'Account',
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.person_outline),
+            activeIcon: const Icon(Icons.person, color: VayaTheme.saffron),
+            label: str.navAccount,
           ),
         ],
       ),
@@ -8643,7 +8736,7 @@ Track live on VAYA Customer App!
       if (cancelSuccess) {
         await VayaStorage.saveCachedActiveBooking(null);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Booking cancelled successfully.')),
+          SnackBar(content: Text(LocalizedStrings.of(context).bookingCancelledSuccess)),
         );
         Navigator.pushAndRemoveUntil(
           context,
@@ -8680,12 +8773,12 @@ Track live on VAYA Customer App!
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Switch Vehicle', style: TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.bold, fontSize: 20)),
+            Text(LocalizedStrings.of(context).switchVehicle, style: const TextStyle(fontFamily: 'General Sans', fontWeight: FontWeight.bold, fontSize: 20)),
             const SizedBox(height: 12),
             ListTile(
               leading: const Icon(Icons.two_wheeler, color: VayaTheme.saffron),
-              title: const Text('Bike', style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('Fastest for small items · ₹72'),
+              title: Text(LocalizedStrings.of(context).bike, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('${LocalizedStrings.of(context).bikeSubtitle} · ₹72'),
               onTap: () {
                 Navigator.pop(ctx);
                 setState(() {
@@ -8696,8 +8789,8 @@ Track live on VAYA Customer App!
             ),
             ListTile(
               leading: const Icon(Icons.electric_rickshaw, color: VayaTheme.saffron),
-              title: const Text('Auto (3-Wheeler)', style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('Ideal for medium loads · ₹115'),
+              title: Text(LocalizedStrings.of(context).autoTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('${LocalizedStrings.of(context).autoSubtitle} · ₹115'),
               onTap: () {
                 Navigator.pop(ctx);
                 setState(() {
@@ -8709,8 +8802,8 @@ Track live on VAYA Customer App!
             ),
             ListTile(
               leading: const Icon(Icons.local_shipping, color: VayaTheme.saffron),
-              title: const Text('Pickup Truck', style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('For heavy/bulk cargo · ₹240'),
+              title: Text(LocalizedStrings.of(context).pickupTruckTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('${LocalizedStrings.of(context).pickupTruckSubtitle} · ₹240'),
               onTap: () {
                 Navigator.pop(ctx);
                 setState(() {
@@ -10796,6 +10889,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    final str = LocalizedStrings.of(context);
     return DefaultTabController(
       length: 3,
       child: Scaffold(
@@ -10810,11 +10904,11 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Title: 30-32 px General Sans / 700 bold typography
-                  const Padding(
-                    padding: EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 4),
                     child: Text(
-                      'Deliveries',
-                      style: TextStyle(
+                      str.myDeliveries,
+                      style: const TextStyle(
                         fontFamily: 'General Sans',
                         fontWeight: FontWeight.w700,
                         fontSize: 30,
@@ -10846,10 +10940,10 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
-                      tabs: const [
-                        Tab(text: 'Active'),
-                        Tab(text: 'Completed'),
-                        Tab(text: 'Cancelled'),
+                      tabs: [
+                        Tab(text: str.active),
+                        Tab(text: str.completed),
+                        Tab(text: str.cancelled),
                       ],
                     ),
                   ),
@@ -12422,6 +12516,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final str = LocalizedStrings.of(context);
     final filteredTxns = _transactions.where((tx) {
       if (_selectedFilter == 'All') return true;
       final title = (tx['title'] ?? '').toString().toLowerCase();
@@ -12451,9 +12546,9 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
         elevation: 0,
         centerTitle: false,
         titleSpacing: 16,
-        title: const Text(
-          'Payments',
-          style: TextStyle(
+        title: Text(
+          str.paymentsAndWallet,
+          style: const TextStyle(
             fontFamily: 'General Sans',
             fontSize: 28,
             fontWeight: FontWeight.w700,
@@ -12493,9 +12588,9 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                       children: [
                         Row(
                           children: [
-                            const Text(
-                              'VAYA Wallet balance',
-                              style: TextStyle(
+                            Text(
+                              str.walletBalance,
+                              style: const TextStyle(
                                 color: Colors.white70,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -12524,9 +12619,9 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                             ),
                           ),
                           icon: const Icon(Icons.add, size: 16),
-                          label: const Text(
-                            'Add money',
-                            style: TextStyle(
+                          label: Text(
+                            str.addMoney,
+                            style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.bold,
                             ),
@@ -13504,6 +13599,7 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   void _languageBottomSheet() {
+    final str = LocalizedStrings.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -13518,8 +13614,13 @@ class _AccountScreenState extends State<AccountScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('App Language', style: TextStyle(fontFamily: 'General Sans', fontSize: 18, fontWeight: FontWeight.bold)),
-                  IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
+                  Text(str.appLanguage, style: const TextStyle(fontFamily: 'General Sans', fontSize: 18, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -13528,10 +13629,10 @@ class _AccountScreenState extends State<AccountScreen> {
                 title: const Text('English', style: TextStyle(fontWeight: FontWeight.bold)),
                 trailing: _appLanguage == 'English' ? const Icon(Icons.check_circle, color: VayaTheme.saffron) : null,
                 onTap: () async {
+                  if (ctx.mounted) Navigator.pop(ctx);
                   setState(() => _appLanguage = 'English');
                   context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('en'));
                   await _updateCustomerInDb({'appLanguage': 'English'});
-                  if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Language updated to English and saved to database')),
@@ -13545,10 +13646,10 @@ class _AccountScreenState extends State<AccountScreen> {
                 title: const Text('ଓଡ଼ିଆ (Odia)', style: TextStyle(fontWeight: FontWeight.bold)),
                 trailing: _appLanguage.contains('Odia') ? const Icon(Icons.check_circle, color: VayaTheme.saffron) : null,
                 onTap: () async {
+                  if (ctx.mounted) Navigator.pop(ctx);
                   setState(() => _appLanguage = 'ଓଡ଼ିଆ (Odia)');
                   context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('or'));
                   await _updateCustomerInDb({'appLanguage': 'ଓଡ଼ିଆ (Odia)'});
-                  if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('ଭାଷା ଓଡ଼ିଆରେ ପରିବର୍ତ୍ତିତ ହୋଇଛି (Odia selected)')),
@@ -13562,10 +13663,10 @@ class _AccountScreenState extends State<AccountScreen> {
                 title: const Text('हिन्दी (Hindi)', style: TextStyle(fontWeight: FontWeight.bold)),
                 trailing: _appLanguage.contains('Hindi') ? const Icon(Icons.check_circle, color: VayaTheme.saffron) : null,
                 onTap: () async {
+                  if (ctx.mounted) Navigator.pop(ctx);
                   setState(() => _appLanguage = 'हिन्दी (Hindi)');
                   context.findAncestorStateOfType<_VayaCustomerAppState>()?.setLocale(const Locale('hi'));
                   await _updateCustomerInDb({'appLanguage': 'हिन्दी (Hindi)'});
-                  if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('भाषा हिन्दी में बदली गई (Hindi selected)')),
@@ -13964,13 +14065,14 @@ class _AccountScreenState extends State<AccountScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final str = LocalizedStrings.of(context);
     if (_isLoading) {
       return Scaffold(
         backgroundColor: VayaTheme.signalCream,
         appBar: AppBar(
           backgroundColor: VayaTheme.signalCream,
           elevation: 0,
-          title: const Text('Account', style: TextStyle(fontFamily: 'General Sans', fontSize: 30, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack)),
+          title: Text(str.account, style: const TextStyle(fontFamily: 'General Sans', fontSize: 30, fontWeight: FontWeight.w700, color: VayaTheme.inkBlack)),
         ),
         body: const Center(
           child: VayaLoader.section(size: 96, message: 'Loading account...'),
@@ -13984,9 +14086,9 @@ class _AccountScreenState extends State<AccountScreen> {
         backgroundColor: VayaTheme.signalCream,
         elevation: 0,
         centerTitle: false,
-        title: const Text(
-          'Account',
-          style: TextStyle(
+        title: Text(
+          str.account,
+          style: const TextStyle(
             fontFamily: 'General Sans',
             fontSize: 30,
             fontWeight: FontWeight.w700,
@@ -14084,7 +14186,7 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 12),
 
             // Logistics Section
-            _buildSectionLabel('Logistics'),
+            _buildSectionLabel(str.logistics),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -14104,7 +14206,7 @@ class _AccountScreenState extends State<AccountScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Saved addresses', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                            Text(str.savedAddresses, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
                             const SizedBox(height: 2),
                             Text(
                               _addresses.isEmpty ? 'No saved addresses' : '${_addresses.length} location${_addresses.length > 1 ? 's' : ''} saved',
@@ -14122,7 +14224,7 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 12),
 
             // Business & Billing Section
-            _buildSectionLabel('Business & billing'),
+            _buildSectionLabel(str.businessAndBilling),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -14142,7 +14244,7 @@ class _AccountScreenState extends State<AccountScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Business & tax details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                            Text(str.businessTaxDetails, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
                             const SizedBox(height: 2),
                             Text(
                               _gstin.isEmpty ? 'Not added' : 'GSTIN: $_gstin',
@@ -14164,7 +14266,7 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 12),
 
             // Preferences Section
-            _buildSectionLabel('Preferences'),
+            _buildSectionLabel(str.preferences),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -14181,14 +14283,14 @@ class _AccountScreenState extends State<AccountScreen> {
                         children: [
                           _buildRowIcon(Icons.notifications_none_outlined),
                           const SizedBox(width: 12),
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
-                                SizedBox(height: 2),
-                                Text('Booking, tracking & WhatsApp controls', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                                Text(str.notifications, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                                const SizedBox(height: 2),
+                                const Text('Booking, tracking & WhatsApp controls', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                               ],
                             ),
                           ),
@@ -14208,7 +14310,7 @@ class _AccountScreenState extends State<AccountScreen> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('App Language', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                                Text(str.appLanguage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
                                 const SizedBox(height: 2),
                                 Text(_appLanguage, style: const TextStyle(fontSize: 11, color: VayaTheme.slate)),
                               ],
@@ -14225,7 +14327,7 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 12),
 
             // Help & Support Section
-            _buildSectionLabel('Help & support'),
+            _buildSectionLabel(str.helpAndSafety),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -14242,14 +14344,14 @@ class _AccountScreenState extends State<AccountScreen> {
                         children: [
                           _buildRowIcon(Icons.support_agent_outlined),
                           const SizedBox(width: 12),
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Contact support', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
-                                SizedBox(height: 2),
-                                Text('24x7 Chat, call & callback options', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                                Text(str.contactSupport, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                                const SizedBox(height: 2),
+                                const Text('24x7 Chat, call & callback options', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                               ],
                             ),
                           ),
@@ -14264,14 +14366,14 @@ class _AccountScreenState extends State<AccountScreen> {
                         children: [
                           _buildRowIcon(Icons.gavel_outlined),
                           const SizedBox(width: 12),
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Disputes & refund cases', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
-                                SizedBox(height: 2),
-                                Text('Track case status & evidence', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                                Text(str.disputesRefunds, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                                const SizedBox(height: 2),
+                                const Text('Track case status & evidence', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                               ],
                             ),
                           ),
@@ -14286,7 +14388,7 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 12),
 
             // Privacy & Legal Section
-            _buildSectionLabel('Privacy & legal'),
+            _buildSectionLabel(str.privacyAndLegal),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -14303,14 +14405,14 @@ class _AccountScreenState extends State<AccountScreen> {
                         children: [
                           _buildRowIcon(Icons.download_outlined),
                           const SizedBox(width: 12),
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Download my data', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
-                                SizedBox(height: 2),
-                                Text('Export scope, format & delivery method', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                                Text(str.downloadMyData, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: VayaTheme.inkBlack)),
+                                const SizedBox(height: 2),
+                                const Text('Export scope, format & delivery method', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                               ],
                             ),
                           ),
@@ -14325,14 +14427,14 @@ class _AccountScreenState extends State<AccountScreen> {
                         children: [
                           _buildRowIcon(Icons.delete_outline, color: Colors.red),
                           const SizedBox(width: 12),
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Delete account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red)),
-                                SizedBox(height: 2),
-                                Text('Account removal & GST invoice retention', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
+                                Text(str.deleteAccount, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red)),
+                                const SizedBox(height: 2),
+                                const Text('Account removal & GST invoice retention', style: TextStyle(fontSize: 11, color: VayaTheme.slate)),
                               ],
                             ),
                           ),
@@ -14361,8 +14463,8 @@ class _AccountScreenState extends State<AccountScreen> {
                     children: [
                       _buildRowIcon(Icons.logout, color: Colors.red),
                       const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text('Sign out', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.red)),
+                      Expanded(
+                        child: Text(str.signOut, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.red)),
                       ),
                       const Icon(Icons.chevron_right, size: 18, color: Colors.red),
                     ],
