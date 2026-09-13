@@ -136,25 +136,25 @@ gcloud run deploy vaya-backend \
 cd ..
 
 echo ">>> Ensuring Firebase Hosting sites and targets are configured..."
-npx -y firebase-tools hosting:sites:create vaya-customer-app --project "$PROJECT_ID" 2>/dev/null || true
-npx -y firebase-tools hosting:sites:create vaya-partner-app --project "$PROJECT_ID" 2>/dev/null || true
+npx -y firebase-tools hosting:sites:create vaya-customer-app --project "$PROJECT_ID" --non-interactive 2>/dev/null || true
+npx -y firebase-tools hosting:sites:create vaya-partner-app --project "$PROJECT_ID" --non-interactive 2>/dev/null || true
 
-npx -y firebase-tools target:apply hosting public goods-delivery-platform --project "$PROJECT_ID" 2>/dev/null || true
-npx -y firebase-tools target:apply hosting admin vaya-logistics-admin --project "$PROJECT_ID" 2>/dev/null || true
-npx -y firebase-tools target:apply hosting customer vaya-customer-app --project "$PROJECT_ID" 2>/dev/null || true
-npx -y firebase-tools target:apply hosting partner vaya-partner-app --project "$PROJECT_ID" 2>/dev/null || true
+npx -y firebase-tools target:apply hosting public goods-delivery-platform --project "$PROJECT_ID" --non-interactive 2>/dev/null || true
+npx -y firebase-tools target:apply hosting admin vaya-logistics-admin --project "$PROJECT_ID" --non-interactive 2>/dev/null || true
+npx -y firebase-tools target:apply hosting customer vaya-customer-app --project "$PROJECT_ID" --non-interactive 2>/dev/null || true
+npx -y firebase-tools target:apply hosting partner vaya-partner-app --project "$PROJECT_ID" --non-interactive 2>/dev/null || true
 
 echo ">>> Deploying Customer Web App to Firebase Hosting..."
-npx -y firebase-tools deploy --only hosting:customer --project "$PROJECT_ID"
+npx -y firebase-tools deploy --only hosting:customer --project "$PROJECT_ID" --non-interactive
 
 echo ">>> Deploying Partner Web App to Firebase Hosting..."
-npx -y firebase-tools deploy --only hosting:partner --project "$PROJECT_ID"
+npx -y firebase-tools deploy --only hosting:partner --project "$PROJECT_ID" --non-interactive
 
 echo ">>> Deploying Admin Portal to Firebase Hosting..."
-npx -y firebase-tools deploy --only hosting:admin --project "$PROJECT_ID"
+npx -y firebase-tools deploy --only hosting:admin --project "$PROJECT_ID" --non-interactive
 
 echo ">>> Deploying Public Website to Firebase Hosting..."
-npx -y firebase-tools deploy --only hosting:public --project "$PROJECT_ID"
+npx -y firebase-tools deploy --only hosting:public --project "$PROJECT_ID" --non-interactive
 
 echo ""
 echo "============================================="
