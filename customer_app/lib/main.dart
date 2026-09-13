@@ -1458,7 +1458,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ? str.resendOtpIn(_resendCountdown)
                         : str.resendOtp,
                     style: TextStyle(
-                      color: _resendCountdown > 0 ? Colors.grey : VayaTheme.vayaOrange,
+                      color: _resendCountdown > 0 ? Colors.grey : VayaTheme.saffron,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
