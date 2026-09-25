@@ -1157,27 +1157,29 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                       ? const VayaLoader.inline(size: 24, color: Colors.white)
                       : Text(_otpSent ? 'Verify OTP' : 'Send OTP Code'),
                 ),
-                const SizedBox(height: 16),
-                Center(
-                  child: TextButton(
-                    onPressed: () {
-                      if (_otpSent && _resendCountdown <= 0 && !_isLoading) {
-                        _sendOtpCode();
-                      }
-                    },
-                    child: Text(
-                      _otpSent && _resendCountdown > 0
-                          ? 'Resend OTP in ${_resendCountdown}s'
-                          : 'Resend OTP',
-                      style: TextStyle(
-                        color: (_otpSent && _resendCountdown <= 0)
-                            ? VayaDriverTheme.saffron
-                            : Colors.grey,
-                        fontWeight: FontWeight.w600,
+                if (_otpSent) ...[
+                  const SizedBox(height: 16),
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        if (_resendCountdown <= 0 && !_isLoading) {
+                          _sendOtpCode();
+                        }
+                      },
+                      child: Text(
+                        _resendCountdown > 0
+                            ? 'Resend OTP in ${_resendCountdown}s'
+                            : 'Resend OTP',
+                        style: TextStyle(
+                          color: _resendCountdown > 0
+                              ? Colors.grey
+                              : VayaDriverTheme.saffron,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

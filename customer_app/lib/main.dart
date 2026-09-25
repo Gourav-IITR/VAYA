@@ -1450,27 +1450,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       ? const VayaLoader.inline(size: 24, color: Colors.white)
                       : Text(_otpSent ? str.verifyOtp : str.sendOtp),
                 ),
-                const SizedBox(height: 16),
-                Center(
-                  child: TextButton(
-                    onPressed: () {
-                      if (_otpSent && _resendCountdown <= 0 && !_isLoading) {
-                        _sendOtpCode();
-                      }
-                    },
-                    child: Text(
-                      _otpSent && _resendCountdown > 0
-                          ? str.resendOtpIn(_resendCountdown)
-                          : str.resendOtp,
-                      style: TextStyle(
-                        color: (_otpSent && _resendCountdown <= 0)
-                            ? VayaTheme.saffron
-                            : Colors.grey,
-                        fontWeight: FontWeight.w600,
+                if (_otpSent) ...[
+                  const SizedBox(height: 16),
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        if (_resendCountdown <= 0 && !_isLoading) {
+                          _sendOtpCode();
+                        }
+                      },
+                      child: Text(
+                        _resendCountdown > 0
+                            ? str.resendOtpIn(_resendCountdown)
+                            : str.resendOtp,
+                        style: TextStyle(
+                          color: _resendCountdown > 0
+                              ? Colors.grey
+                              : VayaTheme.saffron,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
