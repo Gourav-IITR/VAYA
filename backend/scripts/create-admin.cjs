@@ -20,4 +20,4 @@ async function makeAdmin(email, password) {
   }
 }
 
-makeAdmin('admin@goodsdelivery.com', 'SecureAdminPassword123');
+makeAdmin('support@vayadelivery.com', 'SecureAdminPassword123');

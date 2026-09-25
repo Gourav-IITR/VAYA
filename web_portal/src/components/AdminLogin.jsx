@@ -67,7 +67,7 @@ export default function AdminLogin({ onLoginSuccess }) {
               <Mail size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#3C3A34' }} />
               <input
                 type="email"
-                placeholder="admin@vaya.com"
+                placeholder="support@vayadelivery.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={{

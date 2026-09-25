@@ -12943,7 +12943,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                   TextButton(
                     onPressed: () => _showInfoDialog(
                       'Payment Support',
-                      '• If your payment failed or top-up was deducted but not credited, it will be automatically refunded within 24-48 hours.\n• For urgent assistance, contact support via Help & Support or email support@vaya.in with your transaction reference.',
+                      '• If your payment failed or top-up was deducted but not credited, it will be automatically refunded within 24-48 hours.\n• For urgent assistance, contact support via Help & Support or email support@vayadelivery.com with your transaction reference.',
                     ),
                     child: const Text('Failed payments?', style: TextStyle(fontSize: 11.5, color: VayaTheme.saffron, decoration: TextDecoration.underline)),
                   ),

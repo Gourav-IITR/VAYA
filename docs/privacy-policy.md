@@ -43,5 +43,5 @@ We store all transactional details, location positions, and audit logs on secure
 
 ## 5. Contact Us
 If you have any questions about this Privacy Policy, you can reach out to:
-- Email: `support@vaya.in`
+- Email: `support@vayadelivery.com`
 - Phone: `+91 99388 12345`

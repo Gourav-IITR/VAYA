@@ -54,7 +54,7 @@ async function makeAdmin(email, password) {
   console.log(`Successfully created admin user: ${email}`);
 }
 
-makeAdmin('admin@goodsdelivery.com', 'SecureAdminPassword123');
+makeAdmin('support@vayadelivery.com', 'SecureAdminPassword123');
 ```
 
 ---

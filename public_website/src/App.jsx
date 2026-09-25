@@ -319,7 +319,7 @@ export default function App() {
               </p>
             </div>
             <div>
-              <a href="mailto:business@vaya.in" className="btn-primary" style={{ backgroundColor: 'white', color: 'var(--ink-black)' }}>
+              <a href="mailto:support@vayadelivery.com" className="btn-primary" style={{ backgroundColor: 'white', color: 'var(--ink-black)' }}>
                 Contact Sales
               </a>
             </div>
@@ -384,7 +384,7 @@ export default function App() {
             <ul>
               <li><a href="#how-it-works">How it Works</a></li>
               <li><a href="#cities">Cities Served</a></li>
-              <li><a href="mailto:support@vaya.in">Support Center</a></li>
+              <li><a href="mailto:support@vayadelivery.com">Support Center</a></li>
             </ul>
           </div>
 
