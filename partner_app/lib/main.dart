@@ -1091,88 +1091,96 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       appBar: AppBar(title: const Text('VΛYΛ Driver Partner')),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Center(
-              child: Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: VayaDriverTheme.saffron,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Center(
-                  child: Text(
-                    'V',
-                    style: TextStyle(
-                      fontFamily: 'Outfit',
-                      fontSize: 48,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
+        child: Center(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: VayaDriverTheme.saffron,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'V',
+                        style: TextStyle(
+                          fontFamily: 'Outfit',
+                          fontSize: 48,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 32),
-            Text(
-              _otpSent ? 'Verify OTP Code' : 'Partner Sign In',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream),
-            ),
-            const SizedBox(height: 16),
-            if (!_otpSent)
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold),
-                decoration: const InputDecoration(
-                  prefixText: '+91 ',
-                  labelText: 'Enter 10-digit Mobile Number',
+                const SizedBox(height: 32),
+                Text(
+                  _otpSent ? 'Verify OTP Code' : 'Partner Sign In',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: VayaDriverTheme.signalCream),
                 ),
-              )
-            else
-              TextField(
-                controller: _otpController,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, letterSpacing: 8),
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                  labelText: 'Enter 6-digit OTP Code',
+                const SizedBox(height: 16),
+                if (!_otpSent)
+                  TextField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(
+                      prefixText: '+91 ',
+                      labelText: 'Enter 10-digit Mobile Number',
+                    ),
+                  )
+                else
+                  TextField(
+                    controller: _otpController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    style: const TextStyle(color: VayaDriverTheme.signalCream, fontWeight: FontWeight.bold, letterSpacing: 8),
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(
+                      labelText: 'Enter 6-digit OTP Code',
+                    ),
+                  ),
+                if (_errorMsg != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_errorMsg!, style: const TextStyle(color: Colors.red)),
+                ],
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _isLoading ? null : (_otpSent ? _verifyOtpCode : _sendOtpCode),
+                  child: _isLoading
+                      ? const VayaLoader.inline(size: 24, color: Colors.white)
+                      : Text(_otpSent ? 'Verify OTP' : 'Send OTP Code'),
                 ),
-              ),
-            if (_errorMsg != null) ...[
-              const SizedBox(height: 8),
-              Text(_errorMsg!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _isLoading ? null : (_otpSent ? _verifyOtpCode : _sendOtpCode),
-              child: _isLoading
-                  ? const VayaLoader.inline(size: 24, color: Colors.white)
-                  : Text(_otpSent ? 'Verify OTP' : 'Send OTP Code'),
-            ),
-            if (_otpSent) ...[
-              const SizedBox(height: 16),
-              Center(
-                child: TextButton(
-                  onPressed: _resendCountdown > 0 || _isLoading ? null : _sendOtpCode,
-                  child: Text(
-                    _resendCountdown > 0
-                        ? 'Resend OTP in ${_resendCountdown}s'
-                        : 'Resend OTP',
-                    style: TextStyle(
-                      color: _resendCountdown > 0 ? Colors.grey : VayaDriverTheme.saffron,
-                      fontWeight: FontWeight.w600,
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      if (_otpSent && _resendCountdown <= 0 && !_isLoading) {
+                        _sendOtpCode();
+                      }
+                    },
+                    child: Text(
+                      _otpSent && _resendCountdown > 0
+                          ? 'Resend OTP in ${_resendCountdown}s'
+                          : 'Resend OTP',
+                      style: TextStyle(
+                        color: (_otpSent && _resendCountdown <= 0)
+                            ? VayaDriverTheme.saffron
+                            : Colors.grey,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );

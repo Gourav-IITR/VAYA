@@ -1406,66 +1406,74 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              _otpSent ? str.verifyOtp : str.mobileLogin,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
-            ),
-            const SizedBox(height: 16),
-            if (!_otpSent)
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                style: const TextStyle(color: VayaTheme.inkBlack, fontWeight: FontWeight.bold),
-                decoration: InputDecoration(
-                  prefixText: '+91 ',
-                  labelText: str.enterMobile,
+        child: Center(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _otpSent ? str.verifyOtp : str.mobileLogin,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: VayaTheme.inkBlack),
                 ),
-              )
-            else
-              TextField(
-                controller: _otpController,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                style: const TextStyle(color: VayaTheme.inkBlack, fontWeight: FontWeight.bold, letterSpacing: 8),
-                textAlign: TextAlign.center,
-                decoration: InputDecoration(
-                  labelText: str.enterOtpCode,
+                const SizedBox(height: 16),
+                if (!_otpSent)
+                  TextField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    style: const TextStyle(color: VayaTheme.inkBlack, fontWeight: FontWeight.bold),
+                    decoration: InputDecoration(
+                      prefixText: '+91 ',
+                      labelText: str.enterMobile,
+                    ),
+                  )
+                else
+                  TextField(
+                    controller: _otpController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    style: const TextStyle(color: VayaTheme.inkBlack, fontWeight: FontWeight.bold, letterSpacing: 8),
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      labelText: str.enterOtpCode,
+                    ),
+                  ),
+                if (_errorMsg != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_errorMsg!, style: const TextStyle(color: Colors.red)),
+                ],
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _isLoading ? null : (_otpSent ? _verifyOtpCode : _sendOtpCode),
+                  child: _isLoading
+                      ? const VayaLoader.inline(size: 24, color: Colors.white)
+                      : Text(_otpSent ? str.verifyOtp : str.sendOtp),
                 ),
-              ),
-            if (_errorMsg != null) ...[
-              const SizedBox(height: 8),
-              Text(_errorMsg!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _isLoading ? null : (_otpSent ? _verifyOtpCode : _sendOtpCode),
-              child: _isLoading
-                  ? const VayaLoader.inline(size: 24, color: Colors.white)
-                  : Text(_otpSent ? str.verifyOtp : str.sendOtp),
-            ),
-            if (_otpSent) ...[
-              const SizedBox(height: 16),
-              Center(
-                child: TextButton(
-                  onPressed: _resendCountdown > 0 || _isLoading ? null : _sendOtpCode,
-                  child: Text(
-                    _resendCountdown > 0
-                        ? str.resendOtpIn(_resendCountdown)
-                        : str.resendOtp,
-                    style: TextStyle(
-                      color: _resendCountdown > 0 ? Colors.grey : VayaTheme.saffron,
-                      fontWeight: FontWeight.w600,
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      if (_otpSent && _resendCountdown <= 0 && !_isLoading) {
+                        _sendOtpCode();
+                      }
+                    },
+                    child: Text(
+                      _otpSent && _resendCountdown > 0
+                          ? str.resendOtpIn(_resendCountdown)
+                          : str.resendOtp,
+                      style: TextStyle(
+                        color: (_otpSent && _resendCountdown <= 0)
+                            ? VayaTheme.saffron
+                            : Colors.grey,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
