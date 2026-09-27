@@ -25,14 +25,26 @@ router.get('/today-earnings', verifyToken, async (req, res) => {
   try {
     const uid = req.user.uid;
     const result = await query(
-      `SELECT COALESCE(SUM(estimated_cost), 0) AS today_earnings, COUNT(*) AS today_count
+      `SELECT COALESCE(SUM(final_cost), 0) AS today_earnings,
+              COALESCE(SUM(total_waiting_charge), 0) AS today_waiting,
+              COALESCE(SUM(commission_amount), 0) AS today_commission,
+              COUNT(*) AS today_count
        FROM bookings 
-       WHERE driver_id = $1 AND status = 'completed' AND DATE(created_at) = CURRENT_DATE`,
+       WHERE driver_id = $1 AND status = 'completed' AND DATE(completed_at) = CURRENT_DATE`,
       [uid]
     );
     const earnings = parseFloat(result.rows[0].today_earnings || 0);
+    const waiting = parseFloat(result.rows[0].today_waiting || 0);
+    const commission = parseFloat(result.rows[0].today_commission || 0);
     const count = parseInt(result.rows[0].today_count || 0);
-    res.json({ success: true, todayEarnings: earnings, todayCount: count });
+    res.json({ 
+      success: true, 
+      todayEarnings: earnings, 
+      todayWaiting: waiting,
+      todayCommission: commission,
+      todayNetEarnings: earnings - commission,
+      todayCount: count 
+    });
   } catch (err) {
     console.error('GET /api/driver/today-earnings error:', err);
     res.status(500).json({ error: 'Failed to fetch today earnings' });
@@ -59,35 +71,49 @@ router.get('/earnings-stats', verifyToken, async (req, res) => {
   try {
     const uid = req.user.uid;
     const completedRes = await query(
-      `SELECT COALESCE(SUM(estimated_cost), 0) AS total_gross, COUNT(*) AS completed_count
+      `SELECT COALESCE(SUM(final_cost), 0) AS total_gross,
+              COALESCE(SUM(total_waiting_charge), 0) AS total_waiting,
+              COALESCE(SUM(commission_amount), 0) AS total_commission,
+              COALESCE(SUM(driver_net_earnings), 0) AS total_net,
+              COUNT(*) AS completed_count
        FROM bookings 
        WHERE driver_id = $1 AND status = 'completed'`,
       [uid]
     );
     const todayRes = await query(
-      `SELECT COALESCE(SUM(estimated_cost), 0) AS today_gross, COUNT(*) AS today_count
+      `SELECT COALESCE(SUM(final_cost), 0) AS today_gross,
+              COALESCE(SUM(total_waiting_charge), 0) AS today_waiting,
+              COALESCE(SUM(commission_amount), 0) AS today_commission,
+              COUNT(*) AS today_count
        FROM bookings 
-       WHERE driver_id = $1 AND status = 'completed' AND DATE(created_at) = CURRENT_DATE`,
+       WHERE driver_id = $1 AND status = 'completed' AND DATE(completed_at) = CURRENT_DATE`,
       [uid]
     );
 
     const totalGross = parseFloat(completedRes.rows[0].total_gross || 0);
+    const totalWaiting = parseFloat(completedRes.rows[0].total_waiting || 0);
+    const totalCommission = parseFloat(completedRes.rows[0].total_commission || 0);
+    const totalNet = parseFloat(completedRes.rows[0].total_net || 0);
     const completedCount = parseInt(completedRes.rows[0].completed_count || 0);
     const todayGross = parseFloat(todayRes.rows[0].today_gross || 0);
+    const todayWaiting = parseFloat(todayRes.rows[0].today_waiting || 0);
+    const todayCommission = parseFloat(todayRes.rows[0].today_commission || 0);
     const todayCount = parseInt(todayRes.rows[0].today_count || 0);
-
-    const platformFee = totalGross * 0.10; // 10% platform fee
-    const netEarnings = totalGross - platformFee;
 
     res.json({
       success: true,
       stats: {
         totalGross,
+        totalWaiting,
+        totalCommission,
+        totalNet,
         completedCount,
         todayGross,
+        todayWaiting,
+        todayCommission,
         todayCount,
-        platformFee,
-        netEarnings,
+        platformFee: totalCommission,  // backward compat
+        netEarnings: totalNet,         // backward compat
       }
     });
   } catch (err) {

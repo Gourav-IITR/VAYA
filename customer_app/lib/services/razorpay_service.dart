@@ -75,7 +75,7 @@ class RazorpayPaymentService {
     String? bookingId,
   }) async {
     String orderId = '';
-    String keyId = 'rzp_test_TJrEDhnJHouJlF'; // Default test key ID fallback
+    String keyId = 'rzp_live_Th25VpLwmzTAU6'; // Live Razorpay Key ID
     int amountPaise = (amount * 100).round();
     if (amountPaise < 100) amountPaise = 100;
 

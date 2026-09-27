@@ -3892,7 +3892,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   }
 
   String get pickupAmountDisplay {
-    final cost = double.tryParse(_job['estimated_cost']?.toString() ?? _job['estimatedCost']?.toString() ?? '') ?? 0.0;
+    final cost = double.tryParse(_job['final_cost']?.toString() ?? _job['estimated_cost']?.toString() ?? _job['estimatedCost']?.toString() ?? '') ?? 0.0;
     return cost.toStringAsFixed(0);
   }
 
@@ -4238,7 +4238,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   }
 
   void _handleCompleteDeliveryWithCashCheck() {
-    final fare = _job['estimated_cost']?.toString() ?? '72.38';
+    final fare = _job['final_cost']?.toString() ?? _job['estimated_cost']?.toString() ?? '72.38';
     if (_isCashCollectedConfirmed) {
       _updateStatus('completed');
     } else {
@@ -4513,7 +4513,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
     final receiverPhone = (_job['receiver_phone'] ?? _job['customer_phone'] ?? '').toString();
     final activePhone = isPickupPhase ? senderPhone : receiverPhone;
 
-    final fare = _job['estimated_cost']?.toString() ?? '72.38';
+    final fare = _job['final_cost']?.toString() ?? _job['estimated_cost']?.toString() ?? '72.38';
     final topChipText = (_job['payment_type'] == 'cash' || _job['payment_method']?.toString().toLowerCase().contains('cash') == true)
         ? 'Cash payment · ₹$fare'
         : 'Paid online · ₹$fare';
@@ -6881,7 +6881,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
   bool _isOffline = false;
 
   double _walletBalance = 0.0;
-  double _outstandingDues = 142.73;
+  double _outstandingDues = 0.0;
   double _maxLimit = 500.0;
   String _accountStatus = 'active';
   String? _dueDueDate;
@@ -7134,7 +7134,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
 
   // Refactored Payment Flow with Repayment Logic Fix & Complete State Machine
   void _showUpiPaymentSheet() {
-    double outstanding = _outstandingDues > 0 ? _outstandingDues : 142.73;
+    double outstanding = _outstandingDues;
     bool isCustomMode = false;
     String selectedApp = 'gpay';
     final TextEditingController customAmountController = TextEditingController(text: outstanding.toStringAsFixed(2));
@@ -7388,7 +7388,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Repayment Amount Options (Strict Fix: No hardcoded ₹200/₹500 exceeding ₹142.73)
+                    // Repayment Amount Options
                     const Text('REPAYMENT AMOUNT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFCBD5E1), letterSpacing: 0.8)),
                     const SizedBox(height: 8),
                     Row(
@@ -8761,7 +8761,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                                       ),
                                       const SizedBox(height: 16),
 
-                                      // Progress bar & Exact Limit Copy: ₹142.73 of ₹500 used
+                                      // Progress bar & Exact Limit Copy
                                       ClipRRect(
                                         borderRadius: BorderRadius.circular(4),
                                         child: SizedBox(
@@ -10384,7 +10384,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'IFSC: ${(_profileData['ifsc'] ?? '').toString().isNotEmpty ? _profileData['ifsc'].toString() : "HDFC0001234"} • Holder: ${(_profileData['bank_account_name'] ?? _profileData['name'] ?? '').toString()}',
+                        'IFSC: ${(_profileData['ifsc'] ?? '').toString().isNotEmpty ? _profileData['ifsc'].toString() : "Not Provided"} • Holder: ${(_profileData['bank_account_name'] ?? _profileData['name'] ?? '').toString()}',
                         style: TextStyle(fontSize: 12, color: VayaDriverTheme.signalCream.withValues(alpha: 0.6)),
                       ),
                     ] else ...[
@@ -10409,8 +10409,8 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Daily Direct Transfer', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaDriverTheme.signalCream)),
-                        Text('Earnings auto-credited daily at 08:00 AM', style: TextStyle(fontSize: 12, color: VayaDriverTheme.slate)),
+                        Text('Daily Direct Transfer & Instant Payouts', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: VayaDriverTheme.signalCream)),
+                        Text('Withdraw any time (min ₹100). Anything left is sent at 6 pm.', style: TextStyle(fontSize: 12, color: VayaDriverTheme.slate)),
                       ],
                     ),
                   ),
@@ -10484,7 +10484,7 @@ class _DriverAccountScreenState extends State<DriverAccountScreen> {
                 TextField(
                   controller: ifscCtrl,
                   style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 14),
-                  decoration: const InputDecoration(labelText: 'Bank IFSC Code', hintText: 'HDFC0001234', isDense: true),
+                  decoration: const InputDecoration(labelText: 'Bank IFSC Code', hintText: 'e.g., SBIN0001234', isDense: true),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -10854,7 +10854,7 @@ decoration: BoxDecoration(
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    'Partner ID: ${_profileData['partner_id'] ?? '#VY-8842'}',
+                                    'Partner ID: ${_profileData['partner_id'] ?? _profileData['id'] ?? 'Not Available'}',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontFamily: 'Inter',

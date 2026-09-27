@@ -383,6 +383,29 @@ class VayaStorage {
     }
   }
 
+  static Future<int> fetchWalletBalanceFromServer() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final token = await user.getIdToken();
+        final res = await http.get(
+          Uri.parse('$apiBaseUrl/api/payment/wallet'),
+          headers: {'Authorization': 'Bearer $token'},
+        ).timeout(const Duration(seconds: 10));
+
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          final int balance = (data['walletBalance'] ?? data['balance'] ?? 0).toInt();
+          await saveWalletBalance(balance);
+          return balance;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching wallet balance from server: $e');
+    }
+    return await loadWalletBalance();
+  }
+
   static Future<void> saveWalletBalance(int balance) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1613,6 +1636,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     super.initState();
     _loadCachedActiveBookingFirst();
     _checkActiveBooking();
+    VayaStorage.fetchWalletBalanceFromServer(); // Initial sync
     _activeBookingCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       _checkActiveBooking();
     });
@@ -1637,7 +1661,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           initialEstimatedCost: targetFare,
         ),
       ),
-    ).then((_) => _checkActiveBooking());
+    ).then((_) {
+      _checkActiveBooking();
+      VayaStorage.fetchWalletBalanceFromServer(); // Sync after returning
+    });
   }
 
   Future<void> _loadCachedActiveBookingFirst() async {
@@ -6138,7 +6165,7 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
 
   Future<void> _loadLastUsedAndWallet() async {
     final lastUsed = await VayaStorage.loadLastUsedPaymentMethod();
-    final balance = await VayaStorage.loadWalletBalance();
+    final balance = await VayaStorage.fetchWalletBalanceFromServer();
     if (mounted) {
       setState(() {
         _lastUsedPayment = lastUsed;
@@ -6850,7 +6877,7 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Any extra waiting time charges will be taken at the end of the trip as cash payment to the driver.',
+                              'Waiting beyond 10 min is ₹2/min and is added to your final fare. You pay once, after delivery.',
                               style: TextStyle(fontSize: 11.5, color: Color(0xFF1E40AF), fontWeight: FontWeight.w500, fontFamily: 'Inter'),
                             ),
                           ),
@@ -6904,9 +6931,9 @@ class _ReviewDeliveryScreenState extends State<ReviewDeliveryScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildPolicyRow(Icons.check_circle_outline, 'Free cancellation before driver assignment.'),
+                  _buildPolicyRow(Icons.check_circle_outline, 'Free to cancel until the driver arrives.'),
                   const SizedBox(height: 6),
-                  _buildPolicyRow(Icons.info_outline, '₹25 cancellation fee after a driver is assigned.'),
+                  _buildPolicyRow(Icons.info_outline, '₹50 cancellation fee after driver arrives — paid now or added to your next booking.'),
                 ],
               ),
             ),
@@ -11939,7 +11966,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       _fetchError = null;
     });
     try {
-      final bal = await VayaStorage.loadWalletBalance();
+      final bal = await VayaStorage.fetchWalletBalanceFromServer();
       final txns = await VayaStorage.loadTransactions();
       if (mounted) {
         setState(() {

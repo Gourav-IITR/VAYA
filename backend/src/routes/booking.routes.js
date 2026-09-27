@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { body, param, validationResult } from 'express-validator';
 import { query, pool } from '../config/db.js';
-import { verifyToken } from '../middleware/auth.js';
+import { verifyToken, requireRole } from '../middleware/auth.js';
 import { sendNotificationToUser, sendNotificationToDrivers, sendOrderStatusNotification } from '../services/notification.service.js';
 import { broadcast, broadcastToBookingParties } from '../services/websocket.service.js';
 import { evaluateDriverAccountStatus } from './ledger.routes.js';
@@ -369,6 +369,20 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Auto-refund prepaid cancelled bookings (Issue #4 fix)
+    if (booking.payment_type === 'online' && booking.razorpay_payment_id) {
+      try {
+        const { refundPayment } = await import('./payment.routes.js');
+        const poRes = await query('SELECT amount FROM payment_orders WHERE razorpay_payment_id = $1', [booking.razorpay_payment_id]);
+        const refundAmount = poRes.rows.length > 0 ? parseFloat(poRes.rows[0].amount) : 0;
+        if (refundAmount > 0) {
+          await refundPayment(booking.razorpay_payment_id, refundAmount, { reason: 'booking_cancelled' }, id);
+          console.log(`💳 Auto-refund initiated for cancelled booking ${id}: ₹${refundAmount}`);
+        }
+      } catch (refundErr) {
+        console.error(`💳 Auto-refund failed for cancelled booking ${id}:`, refundErr.message);
+      }
+    }
     // Broadcast WS updates
     broadcast({ type: 'booking_status', bookingId: id, status: 'cancelled', booking: updatedBooking });
     if (booking.driver_id) {
@@ -564,12 +578,26 @@ router.post(
           return res.status(400).json({ error: 'Razorpay payment ID required for online payment.' });
         }
         const paymentCheck = await client.query(
-          "SELECT id FROM payment_orders WHERE razorpay_payment_id = $1 AND status = 'paid' AND purpose = 'booking_fare'",
+          "SELECT id, user_id, amount, booking_id FROM payment_orders WHERE razorpay_payment_id = $1 AND status = 'paid' AND purpose = 'booking_fare' FOR UPDATE",
           [razorpayPaymentId]
         );
         if (paymentCheck.rows.length === 0) {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Payment not verified. Please complete payment first.' });
+        }
+        
+        const paymentOrder = paymentCheck.rows[0];
+        if (paymentOrder.user_id !== customerId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Payment does not belong to this user.' });
+        }
+        if (Math.abs(parseFloat(paymentOrder.amount) - estimatedCost) > 1.0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Payment amount mismatch.' });
+        }
+        if (paymentOrder.booking_id !== null) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Payment already consumed by another booking.' });
         }
       }
 
@@ -611,6 +639,14 @@ router.post(
       const booking = bookingRes.rows[0];
       booking.customer_phone = custPhone;
       booking.customer_name = custName;
+
+      // Mark payment order as consumed by this booking
+      if (resolvedPaymentType === 'online' && razorpayPaymentId) {
+        await client.query(
+          'UPDATE payment_orders SET booking_id = $1 WHERE razorpay_payment_id = $2',
+          [booking.id, razorpayPaymentId]
+        );
+      }
 
       // Add booking event log
       await client.query(
@@ -706,12 +742,24 @@ router.post(
         return res.status(400).json({ error: 'You must go online to accept bookings.' });
       }
 
+      // Server-side account status gate (Issue #13 fix)
+      if (driver.account_status === 'trip_paused') {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Your account is paused due to outstanding dues. Please clear dues to accept trips.' });
+      }
+
       // 2. Lock and verify booking status
       const bookingRes = await client.query('SELECT * FROM bookings WHERE id = $1 FOR UPDATE', [bookingId]);
       if (bookingRes.rows.length === 0) {
         return res.status(404).json({ error: 'Booking not found.' });
       }
       const booking = bookingRes.rows[0];
+
+      if (driver.account_status === 'cash_restricted' && booking.payment_type === 'cash') {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Cash trips are restricted due to outstanding dues. Accept online-paid trips or clear dues.' });
+      }
+
       if (booking.status !== 'pending') {
         return res.status(400).json({ error: 'Booking is no longer pending.' });
       }
@@ -876,7 +924,7 @@ router.post(
   verifyToken,
   [
     body('bookingId').isUUID(),
-    body('status').isIn(['arrived_pickup', 'arrived_dropoff', 'completed', 'cancelled'])
+    body('status').isIn(['arrived_pickup', 'arrived_dropoff', 'cancelled'])
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -904,144 +952,7 @@ router.post(
       let updatedBooking;
 
       // State machine logic
-      if (status === 'completed') {
-        // H1 fix: only the assigned driver or an admin may complete a booking.
-        // Customers are only allowed to send 'arrived_pickup', 'arrived_dropoff', or 'cancelled'.
-        // Allowing customers to send 'completed' bypasses the drop-off OTP gate entirely.
-        if (booking.driver_id !== userId && req.user.role !== 'admin') {
-          return res.status(403).json({ error: 'Only the assigned driver or an admin can complete a booking.' });
-        }
-
-        if (booking.status !== 'dropping_off' && booking.status !== 'arrived_dropoff') {
-          return res.status(400).json({ error: 'Cannot complete booking before picking up cargo.' });
-        }
-
-        // --- Calculate Waiting Time Charges ---
-        const configRes = await client.query('SELECT free_wait_minutes_pickup, free_wait_minutes_dropoff, wait_charge_per_minute FROM pricing_config WHERE vehicle_type = $1', [booking.vehicle_type]);
-        const pConfig = configRes.rows[0] || {};
-        const freePickupMins = parseInt(pConfig.free_wait_minutes_pickup ?? 10);
-        const freeDropoffMins = parseInt(pConfig.free_wait_minutes_dropoff ?? 10);
-        const ratePerMin = parseFloat(pConfig.wait_charge_per_minute ?? 2.00);
-
-        // Pickup wait calculation: arrived_pickup_at -> pickup_verified_at
-        let pickupWaitMins = 0;
-        let pickupWaitCharge = 0;
-        if (booking.arrived_pickup_at && booking.pickup_verified_at) {
-          const pickupMs = new Date(booking.pickup_verified_at).getTime() - new Date(booking.arrived_pickup_at).getTime();
-          pickupWaitMins = Math.max(0, Math.floor(pickupMs / 60000));
-          const billablePickupMins = Math.max(0, pickupWaitMins - freePickupMins);
-          pickupWaitCharge = Math.round(billablePickupMins * ratePerMin * 100) / 100;
-        }
-
-        // Dropoff wait calculation: arrived_dropoff_at -> now
-        let dropoffWaitMins = 0;
-        let dropoffWaitCharge = 0;
-        const now = new Date();
-        if (booking.arrived_dropoff_at) {
-          const dropoffMs = now.getTime() - new Date(booking.arrived_dropoff_at).getTime();
-          dropoffWaitMins = Math.max(0, Math.floor(dropoffMs / 60000));
-          const billableDropoffMins = Math.max(0, dropoffWaitMins - freeDropoffMins);
-          dropoffWaitCharge = Math.round(billableDropoffMins * ratePerMin * 100) / 100;
-        }
-
-        const totalWaitingCharge = Math.round((pickupWaitCharge + dropoffWaitCharge) * 100) / 100;
-        const baseEstimatedFare = parseFloat(booking.estimated_cost || 0);
-        const fare = baseEstimatedFare + totalWaitingCharge;
-        const commission = Math.round((fare * 0.10) * 100) / 100; // 10% platform commission
-        const paymentType = booking.payment_type || 'cash';
-        const driverId = booking.driver_id;
-
-        // Fetch driver wallet & dues details with row lock
-        const driverRes = await client.query('SELECT wallet_balance, outstanding_dues FROM drivers WHERE id = $1 FOR UPDATE', [driverId]);
-        let currentWallet = parseFloat(driverRes.rows[0]?.wallet_balance || 0);
-        let currentDues = parseFloat(driverRes.rows[0]?.outstanding_dues || 0);
-
-        let driverNetEarnings = 0;
-
-        if (paymentType === 'online' || paymentType === 'wallet') {
-          // Online/Wallet: Platform already collected fare via Razorpay or customer wallet.
-          // Credit full fare to driver's available balance.
-          // Add commission to driver's amount due (owed to platform).
-          driverNetEarnings = fare;
-          currentWallet += fare;
-          currentDues += commission;
-
-          // Record Trip Earning Entry (full fare credited)
-          await client.query(
-            `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
-             VALUES ($1, $2, 'trip_earning', $3, $4, $5)`,
-            [driverId, bookingId, fare, currentWallet, `Trip Earning (₹${fare} - ${paymentType.toUpperCase()} payment)`]
-          );
-
-          // Record Platform Commission Entry (debit)
-          await client.query(
-            `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
-             VALUES ($1, $2, 'platform_commission', $3, $4, $5)`,
-            [driverId, bookingId, -commission, -currentDues, `Platform Commission (10% of ₹${fare})`]
-          );
-
-          // For wallet payments: deduct from customer's wallet
-          if (paymentType === 'wallet' && booking.customer_id) {
-            const custWalletRes = await client.query(
-              'SELECT wallet_balance FROM customers WHERE id = $1 FOR UPDATE',
-              [booking.customer_id]
-            );
-            const custBalance = parseFloat(custWalletRes.rows[0]?.wallet_balance || 0);
-            const newCustBalance = Math.max(0, custBalance - fare);
-            await client.query(
-              'UPDATE customers SET wallet_balance = $1 WHERE id = $2',
-              [newCustBalance, booking.customer_id]
-            );
-            await client.query(
-              `INSERT INTO customer_wallet_transactions (customer_id, type, amount, balance_after, booking_id, description)
-               VALUES ($1, 'booking_payment', $2, $3, $4, $5)`,
-              [booking.customer_id, -fare, newCustBalance, bookingId, `Booking fare payment (₹${fare})`]
-            );
-          }
-        } else {
-          // Cash: Driver collects full fare directly from customer.
-          // Only commission is owed to platform as Amount Due.
-          driverNetEarnings = fare;
-          currentDues += commission;
-
-          // Record Commission Debit Entry
-          await client.query(
-            `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
-             VALUES ($1, $2, 'platform_commission', $3, $4, $5)`,
-            [driverId, bookingId, -commission, -currentDues, `Platform Commission (Cash Fare ₹${fare})`]
-          );
-        }
-
-        // Update driver wallet & dues
-        await client.query(
-          `UPDATE drivers SET wallet_balance = $1, outstanding_dues = $2, status = 'online' WHERE id = $3`,
-          [currentWallet, currentDues, driverId]
-        );
-
-        // Update booking settlement state and waiting charges
-        const updateRes = await client.query(
-          `UPDATE bookings SET 
-             status = 'completed', 
-             commission_amount = $1, 
-             driver_net_earnings = $2, 
-             is_settled = TRUE,
-             completed_at = NOW(),
-             pickup_wait_minutes = $3,
-             dropoff_wait_minutes = $4,
-             waiting_charge_pickup = $5,
-             waiting_charge_dropoff = $6,
-             total_waiting_charge = $7,
-             final_cost = $8
-           WHERE id = $9 RETURNING *`,
-          [commission, driverNetEarnings, pickupWaitMins, dropoffWaitMins, pickupWaitCharge, dropoffWaitCharge, totalWaitingCharge, fare, bookingId]
-        );
-        updatedBooking = updateRes.rows[0];
-
-        await client.query(
-          'INSERT INTO booking_events (booking_id, event_type, description) VALUES ($1, $2, $3)',
-          [bookingId, 'completed', `Delivery completed. Ledger settled (${paymentType.toUpperCase()} payment mode). Total fare: ₹${fare} (Waiting: ₹${totalWaitingCharge})`]
-        );
-      } else if (status === 'cancelled') {
+      if (status === 'cancelled') {
         if (booking.status === 'completed' || booking.status === 'expired') {
           return res.status(400).json({ error: 'Cannot cancel an already completed or expired booking.' });
         }
@@ -1056,6 +967,35 @@ router.post(
           [userId, cancellerRole, cancellationFee, bookingId]
         );
         updatedBooking = updateRes.rows[0];
+
+        // Charge cancellation fee and credit driver (Issue #12 fix)
+        if (cancellationFee > 0) {
+          if (isCustomerCancel && booking.customer_id) {
+            // Add fee to customer's outstanding dues
+            await client.query(
+              'UPDATE customers SET outstanding_dues = COALESCE(outstanding_dues, 0) + $1 WHERE id = $2',
+              [cancellationFee, booking.customer_id]
+            );
+          }
+
+          if (booking.driver_id) {
+            // Credit 80% of cancellation fee to the driver
+            const driverShare = Math.round(cancellationFee * 0.80 * 100) / 100;
+            if (driverShare > 0) {
+              await client.query(
+                'UPDATE drivers SET wallet_balance = wallet_balance + $1 WHERE id = $2',
+                [driverShare, booking.driver_id]
+              );
+              await client.query(
+                `INSERT INTO partner_ledgers (driver_id, booking_id, entry_type, amount, balance_after, description)
+                 VALUES ($1, $2, 'reimbursement', $3, 
+                   (SELECT wallet_balance FROM drivers WHERE id = $1), $4)`,
+                [booking.driver_id, bookingId, driverShare, 
+                 `Cancellation fee share (80% of ₹${cancellationFee}) — customer cancelled after driver arrived`]
+              );
+            }
+          }
+        }
 
         if (booking.driver_id) {
           await client.query("UPDATE drivers SET status = 'online' WHERE id = $1", [booking.driver_id]);
@@ -1083,23 +1023,32 @@ router.post(
 
       await client.query('COMMIT');
 
-      if (status === 'completed' && booking.driver_id) {
-        await evaluateDriverAccountStatus(booking.driver_id);
+      // Auto-refund prepaid cancelled bookings (Issue #4 fix)
+      if (status === 'cancelled' && booking.payment_type === 'online' && booking.razorpay_payment_id) {
+        try {
+          const { refundPayment } = await import('./payment.routes.js');
+          const poRes = await query('SELECT amount FROM payment_orders WHERE razorpay_payment_id = $1', [booking.razorpay_payment_id]);
+          const refundAmount = poRes.rows.length > 0 ? parseFloat(poRes.rows[0].amount) : 0;
+          if (refundAmount > 0) {
+            await refundPayment(booking.razorpay_payment_id, refundAmount, { reason: 'booking_cancelled' }, bookingId);
+            console.log(`💳 Auto-refund initiated for cancelled booking ${bookingId}: ₹${refundAmount}`);
+          }
+        } catch (refundErr) {
+          console.error(`💳 Auto-refund failed for cancelled booking ${bookingId}:`, refundErr.message);
+        }
       }
 
       // Broadcast booking status change to parties only.
       // Audit fix Critical #2: replaced broadcast() with scoped helper.
       broadcastToBookingParties(booking.customer_id, booking.driver_id, { type: 'booking_status', bookingId, status, booking: updatedBooking });
 
-      // If status completed/cancelled, broadcast that driver is online again (no PII — fine for all)
-      if ((status === 'completed' || status === 'cancelled') && booking.driver_id) {
+      // If cancelled, broadcast that driver is online again (no PII — fine for all)
+      if (status === 'cancelled' && booking.driver_id) {
         broadcast({ type: 'driver_status', driverId: booking.driver_id, status: 'online' });
       }
 
       // Send status notifications
-      if (status === 'completed') {
-        sendOrderStatusNotification(bookingId, 'delivered');
-      } else if (status === 'cancelled') {
+      if (status === 'cancelled') {
         const isCustomer = (userId === booking.customer_id);
         const cancellerRole = isCustomer ? 'Customer' : (userId === booking.driver_id ? 'Driver' : 'Admin');
         const cancellationFee = booking.arrived_pickup_at ? 50.00 : 0.00;
@@ -1591,7 +1540,7 @@ router.post(
 );
 
 // POST /api/booking/:id/notify-customer-payment
-router.post('/:id/notify-customer-payment', verifyToken, async (req, res) => {
+router.post('/:id/notify-customer-payment', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const { id } = req.params;
     const bookingRes = await query('SELECT customer_id, estimated_cost, amount_due_now, total_waiting_charge FROM bookings WHERE id = $1', [id]);
@@ -1609,10 +1558,17 @@ router.post('/:id/notify-customer-payment', verifyToken, async (req, res) => {
 });
 
 // POST /api/booking/:id/support-override
-router.post('/:id/support-override', verifyToken, async (req, res) => {
+router.post('/:id/support-override', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const { id } = req.params;
     await query('UPDATE bookings SET support_override_approved = TRUE WHERE id = $1', [id]);
+    
+    // Add audit log for support override
+    await query(
+      'INSERT INTO booking_events (booking_id, event_type, description) VALUES ($1, $2, $3)',
+      [id, 'support_override_approved', `Support override approved by admin ${req.user.uid}`]
+    );
+
     broadcast({ type: 'support_override_approved', bookingId: id });
     res.json({ success: true, message: 'Support override approved for booking.' });
   } catch (err) {

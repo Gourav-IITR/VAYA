@@ -238,41 +238,53 @@ router.post('/webhook', async (req, res) => {
       const payment = event.payload.payment.entity;
       const orderId = payment.order_id;
       const paymentId = payment.id;
+      const eventId = event.account_id + '_' + paymentId + '_' + eventType;
 
-      // Check if already processed
-      const orderRes = await query(
-        'SELECT * FROM payment_orders WHERE razorpay_order_id = $1',
-        [orderId]
-      );
-
-      if (orderRes.rows.length > 0 && orderRes.rows[0].status !== 'paid') {
-        const paymentOrder = orderRes.rows[0];
-
-        // Mark as paid via webhook
-        await query(
-          `UPDATE payment_orders SET status = 'paid', razorpay_payment_id = $1, verified_at = CURRENT_TIMESTAMP WHERE id = $2`,
-          [paymentId, paymentOrder.id]
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        
+        // Dedup event
+        const dedupRes = await client.query(
+          'INSERT INTO razorpay_events (event_id, event_type, payload) VALUES ($1, $2, $3) ON CONFLICT (event_id) DO NOTHING RETURNING id',
+          [eventId, eventType, JSON.stringify(event)]
         );
-
-        // Process settlement based on purpose
-        const client = await pool.connect();
-        try {
-          await client.query('BEGIN');
-
-          if (paymentOrder.purpose === 'wallet_topup') {
-            await settleWalletTopup(client, paymentOrder.user_id, paymentOrder, paymentId);
-          } else if (paymentOrder.purpose === 'dues_repayment') {
-            await settleDuesRepayment(client, paymentOrder.user_id, paymentOrder, paymentId);
-          }
-
-          await client.query('COMMIT');
-          console.log(`💳 Webhook: Settled ${paymentOrder.purpose} for user ${paymentOrder.user_id}`);
-        } catch (settleErr) {
+        
+        if (dedupRes.rows.length === 0) {
+          // Event already processed
           await client.query('ROLLBACK');
-          console.error('💳 Webhook settlement error:', settleErr);
-        } finally {
-          client.release();
+        } else {
+          // Fetch order with lock
+          const orderRes = await client.query(
+            "SELECT * FROM payment_orders WHERE razorpay_order_id = $1 AND status <> 'paid' FOR UPDATE",
+            [orderId]
+          );
+
+          if (orderRes.rows.length > 0) {
+            const paymentOrder = orderRes.rows[0];
+
+            // Mark as paid via webhook
+            await client.query(
+              `UPDATE payment_orders SET status = 'paid', razorpay_payment_id = $1, verified_at = CURRENT_TIMESTAMP WHERE id = $2`,
+              [paymentId, paymentOrder.id]
+            );
+
+            // Process settlement based on purpose
+            if (paymentOrder.purpose === 'wallet_topup') {
+              await settleWalletTopup(client, paymentOrder.user_id, paymentOrder, paymentId);
+            } else if (paymentOrder.purpose === 'dues_repayment') {
+              await settleDuesRepayment(client, paymentOrder.user_id, paymentOrder, paymentId);
+            }
+
+            console.log(`💳 Webhook: Settled ${paymentOrder.purpose} for user ${paymentOrder.user_id}`);
+          }
+          await client.query('COMMIT');
         }
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('💳 Webhook captured error:', err);
+      } finally {
+        client.release();
       }
     } else if (eventType === 'payment.failed') {
       const payment = event.payload.payment.entity;
@@ -283,6 +295,64 @@ router.post('/webhook', async (req, res) => {
         [orderId]
       );
       console.log(`💳 Webhook: Payment failed for order ${orderId}`);
+    } else if (eventType === 'refund.processed') {
+      const refund = event.payload.refund.entity;
+      await query(
+        `UPDATE refunds SET status = 'processed', processed_at = CURRENT_TIMESTAMP WHERE razorpay_refund_id = $1`,
+        [refund.id]
+      );
+      console.log(`💳 Webhook: Refund processed for ${refund.id}`);
+    } else if (eventType === 'refund.failed') {
+      const refund = event.payload.refund.entity;
+      await query(
+        `UPDATE refunds SET status = 'failed', processed_at = CURRENT_TIMESTAMP WHERE razorpay_refund_id = $1`,
+        [refund.id]
+      );
+      console.log(`💳 Webhook: Refund failed for ${refund.id}`);
+    } else if (eventType === 'qr_code.credited' || eventType === 'order.paid') {
+      const entity = event.payload.qr_code ? event.payload.qr_code.entity : event.payload.order.entity;
+      const notes = entity.notes || {};
+      if (notes.bookingId) {
+        await query(
+          `UPDATE settlements SET paid_online = final_cost, amount_due = 0, state = 'paid', paid_at = CURRENT_TIMESTAMP WHERE booking_id = $1`,
+          [notes.bookingId]
+        );
+        await query(
+          `UPDATE bookings SET is_settled = TRUE WHERE id = $1`,
+          [notes.bookingId]
+        );
+        console.log(`💳 Webhook: Settlement paid via ${eventType} for booking ${notes.bookingId}`);
+      }
+    } else if (eventType === 'payment_link.paid') {
+      const pl = event.payload.payment_link.entity;
+      const notes = pl.notes || {};
+      if (notes.bookingId) {
+        await query(
+          `UPDATE settlements SET state = 'paid', paid_at = CURRENT_TIMESTAMP WHERE booking_id = $1`,
+          [notes.bookingId]
+        );
+        if (notes.customerId) {
+          await query(
+            `UPDATE customers SET outstanding_dues = 0 WHERE id = $1`,
+            [notes.customerId]
+          );
+        }
+        console.log(`💳 Webhook: Payment Link paid for booking ${notes.bookingId}`);
+      }
+    } else if (eventType === 'payout.processed') {
+      const payout = event.payload.payout.entity;
+      await query(
+        `UPDATE payouts SET status = 'processed', utr = $1, processed_at = CURRENT_TIMESTAMP WHERE razorpay_payout_id = $2 OR reference_id = $3`,
+        [payout.utr || null, payout.id, payout.reference_id]
+      );
+      console.log(`💳 Webhook: Payout processed ${payout.id}`);
+    } else if (eventType === 'payout.failed' || eventType === 'payout.reversed') {
+      const payout = event.payload.payout.entity;
+      await query(
+        `UPDATE payouts SET status = 'failed', failure_reason = $1, processed_at = CURRENT_TIMESTAMP WHERE razorpay_payout_id = $2 OR reference_id = $3`,
+        [payout.failure_reason || 'Payout failed', payout.id, payout.reference_id]
+      );
+      console.log(`💳 Webhook: Payout failed ${payout.id}`);
     }
 
     // Always return 200 to acknowledge webhook
@@ -379,12 +449,32 @@ async function settleDuesRepayment(client, userId, paymentOrder, razorpayPayment
 
   const currentDues = parseFloat(driverRes.rows[0].outstanding_dues || 0);
   const newDues = Math.max(0, currentDues - amount);
+  const overpayment = Math.max(0, amount - currentDues);
 
   // Update driver's outstanding dues
   await client.query(
     'UPDATE drivers SET outstanding_dues = $1, dues_due_date = NULL WHERE id = $2',
     [newDues, userId]
   );
+
+  // Credit overpayment to driver wallet balance (Issue #11 fix)
+  if (overpayment > 0) {
+    await client.query(
+      'UPDATE drivers SET wallet_balance = wallet_balance + $1 WHERE id = $2',
+      [overpayment, userId]
+    );
+    // Get updated wallet balance for ledger entry
+    const updatedWalletRes = await client.query(
+      'SELECT wallet_balance FROM drivers WHERE id = $1',
+      [userId]
+    );
+    const updatedWallet = parseFloat(updatedWalletRes.rows[0]?.wallet_balance || 0);
+    await client.query(
+      `INSERT INTO partner_ledgers (driver_id, entry_type, amount, balance_after, description)
+       VALUES ($1, 'dues_offset', $2, $3, $4)`,
+      [userId, overpayment, updatedWallet, `Overpayment credited to wallet (₹${overpayment} excess from dues repayment)`]
+    );
+  }
 
   // Record ledger entry
   await client.query(
@@ -406,8 +496,48 @@ async function settleDuesRepayment(client, userId, paymentOrder, razorpayPayment
   return {
     outstanding_dues: newDues,
     account_status: updatedStatus,
-    message: `₹${amount} dues repayment successful`
+    overpayment_credited: overpayment > 0 ? overpayment : 0,
+    message: overpayment > 0 
+      ? `₹${amount} dues repayment successful. ₹${overpayment} excess credited to wallet.`
+      : `₹${amount} dues repayment successful`
   };
+}
+
+/**
+ * Initiate a Razorpay refund for a captured payment.
+ * @param {string} razorpayPaymentId - The Razorpay payment ID to refund
+ * @param {number} amountInr - Amount to refund in INR
+ * @param {object} notes - Notes object for the refund
+ * @param {string|null} bookingId - Associated booking ID
+ * @returns {object} The refund record
+ */
+export async function refundPayment(razorpayPaymentId, amountInr, notes = {}, bookingId = null) {
+  if (!razorpayInstance) {
+    throw new Error('Razorpay not configured');
+  }
+
+  const amountPaise = Math.round(amountInr * 100);
+
+  // Create Razorpay refund
+  const refund = await razorpayInstance.payments.refund(razorpayPaymentId, {
+    amount: amountPaise,
+    speed: 'optimum',
+    notes: {
+      ...notes,
+      booking_id: bookingId || '',
+      reason: notes.reason || 'booking_cancelled_or_expired'
+    }
+  });
+
+  // Store refund record
+  await query(
+    `INSERT INTO refunds (booking_id, razorpay_payment_id, razorpay_refund_id, amount, status, speed, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [bookingId, razorpayPaymentId, refund.id, amountInr, 'initiated', 'optimum', JSON.stringify(notes)]
+  );
+
+  console.log(`💳 Refund initiated: ${refund.id} for ₹${amountInr} (payment: ${razorpayPaymentId})`);
+  return refund;
 }
 
 export default router;

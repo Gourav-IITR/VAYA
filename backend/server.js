@@ -21,9 +21,12 @@ import customerRouter from './src/routes/customer.routes.js';
 import driverRouter from './src/routes/driver.routes.js';
 import bookingRouter from './src/routes/booking.routes.js';
 import ledgerRouter from './src/routes/ledger.routes.js';
-import paymentRouter from './src/routes/payment.routes.js';
+import paymentRouter, { refundPayment } from './src/routes/payment.routes.js';
 import adminRouter from './src/routes/admin.routes.js';
 import healthRouter from './src/routes/health.routes.js';
+import fareRouter from './src/routes/fare.routes.js';
+import settlementRouter from './src/routes/settlement.routes.js';
+import payoutRouter from './src/routes/payout.routes.js';
 
 const app = express();
 const server = createServer(app);
@@ -92,6 +95,9 @@ app.use('/api/customer', customerRouter);
 app.use('/api/partner', driverRouter);
 app.use('/api/driver', driverRouter);
 app.use('/api/booking', bookingRouter);  // canonical mount — /api/bookings alias removed (audit LOW)
+app.use('/api/fare', fareRouter);
+app.use('/api/settlement', settlementRouter);
+app.use('/api/payout', payoutRouter);
 app.use('/api/ledger', ledgerRouter);
 app.use('/api/payment', paymentRouter);
 app.use('/api/admin', adminRouter);
@@ -164,13 +170,32 @@ wss.on('connection', (ws, request, decodedToken) => {
 const checkPendingExpirations = async () => {
   try {
     const res = await query(
-      "UPDATE bookings SET status = 'expired' WHERE status = 'pending' AND expires_at < CURRENT_TIMESTAMP RETURNING id"
+      "UPDATE bookings SET status = 'expired' WHERE status = 'pending' AND expires_at < CURRENT_TIMESTAMP RETURNING id, payment_type, razorpay_payment_id"
     );
     if (res.rows.length > 0) {
       console.log(`⏳ Auto-expired ${res.rows.length} pending bookings.`);
       res.rows.forEach(b => {
         broadcast({ type: 'booking_expired', bookingId: b.id });
       });
+      
+      // Auto-refund prepaid expired bookings (Issue #4 fix)
+      for (const b of res.rows) {
+        if (b.payment_type === 'online' && b.razorpay_payment_id) {
+          try {
+            const poRes = await query(
+              'SELECT amount FROM payment_orders WHERE razorpay_payment_id = $1',
+              [b.razorpay_payment_id]
+            );
+            const refundAmount = poRes.rows.length > 0 ? parseFloat(poRes.rows[0].amount) : 0;
+            if (refundAmount > 0) {
+              await refundPayment(b.razorpay_payment_id, refundAmount, { reason: 'booking_expired' }, b.id);
+              console.log(`💳 Auto-refund initiated for expired booking ${b.id}: ₹${refundAmount}`);
+            }
+          } catch (refundErr) {
+            console.error(`💳 Auto-refund failed for expired booking ${b.id}:`, refundErr.message);
+          }
+        }
+      }
     }
   } catch (err) {
     console.error('Failed to run pending expirations task:', err.message);

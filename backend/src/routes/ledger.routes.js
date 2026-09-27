@@ -78,65 +78,7 @@ router.get('/driver', verifyToken, async (req, res) => {
 });
 
 // POST /api/ledger/repay-dues - Driver direct repayment via UPI / Net banking
-router.post(
-  '/repay-dues',
-  verifyToken,
-  [body('amount').isFloat({ min: 1 }).withMessage('Repayment amount must be at least ₹1')],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    try {
-      const uid = req.user.uid;
-      const amount = parseFloat(req.body.amount);
-      const paymentRef = req.body.paymentRef || `UPI-REP-${Date.now()}`;
-
-      const driverRes = await query('SELECT outstanding_dues FROM drivers WHERE id = $1', [uid]);
-      if (driverRes.rows.length === 0) {
-        return res.status(404).json({ error: 'Driver profile not found' });
-      }
-
-      const currentDues = parseFloat(driverRes.rows[0].outstanding_dues || 0);
-      const newDues = Math.max(0, currentDues - amount);
-
-      // 1. Update driver's outstanding dues
-      await query(
-        'UPDATE drivers SET outstanding_dues = $1, dues_due_date = NULL WHERE id = $2',
-        [newDues, uid]
-      );
-
-      // 2. Record ledger entry
-      const ledgerEntry = await query(
-        `INSERT INTO partner_ledgers (driver_id, entry_type, amount, balance_after, description)
-         VALUES ($1, 'direct_repayment', $2, $3, $4)
-         RETURNING *`,
-        [uid, amount, -newDues, `Direct UPI Dues Repayment (${paymentRef})`]
-      );
-
-      // 3. Re-evaluate account status
-      const updatedStatus = await evaluateDriverAccountStatus(uid);
-
-      broadcastToUser(uid, {
-        type: 'ledger_update',
-        dues: newDues,
-        accountStatus: updatedStatus
-      });
-
-      res.json({
-        success: true,
-        message: 'Dues repayment successful!',
-        outstandingDues: newDues,
-        accountStatus: updatedStatus,
-        ledgerEntry: ledgerEntry.rows[0]
-      });
-    } catch (err) {
-      console.error('POST /api/ledger/repay-dues error:', err);
-      res.status(500).json({ error: 'Repayment failed' });
-    }
-  }
-);
+// This endpoint has been removed. The secure path already exists through POST /api/payment/verify -> settleDuesRepayment.
 
 // POST /api/ledger/dispute-entry - Flag a ledger charge as disputed under review
 router.post(
