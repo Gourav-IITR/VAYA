@@ -226,9 +226,9 @@ const checkDriverPresence = async () => {
 setInterval(checkDriverPresence, 15000); // Check presence every 15 seconds
 
 // ── Startup & Initialization ────────────────────────────────────────────────
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 8080;
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 GoodsDelivery backend running on port ${PORT}`);
   initDb().catch(err => {
     console.error('❌ Database initialization error:', err.message);
