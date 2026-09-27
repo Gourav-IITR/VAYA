@@ -126,6 +126,8 @@ router.post(
       );
 
       let razorpayOrder = null;
+      let upiString = null;
+      let qrImageUrl = null;
       // If payment method is upi_at_drop and amount_due > 0, generate Razorpay Order for single-use QR / in-app intent
       if (paymentMethod === 'upi_at_drop' && amountDue > 0) {
         const orderReceipt = `settle_${booking.id.substring(0, 8)}_${Date.now()}`;
@@ -139,6 +141,9 @@ router.post(
             purpose: 'settlement',
           },
         });
+
+        upiString = `upi://pay?pa=vaya.logistics@razorpay&pn=VAYA%20Logistics&tr=${razorpayOrder.id}&am=${amountDue.toFixed(2)}&cu=INR&tn=VAYA%20Booking%20${booking.id.substring(0, 8)}`;
+        qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiString)}`;
 
         // Store payment order record
         await client.query(
@@ -158,6 +163,7 @@ router.post(
         finalCost,
         amountDue,
         paymentMethod,
+        razorpayOrderId: razorpayOrder ? razorpayOrder.id : null,
       });
 
       return res.json({
@@ -178,6 +184,8 @@ router.post(
               amount: amountDue,
               currency: 'INR',
               key: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder',
+              upiString,
+              qrImageUrl,
             }
           : null,
       });
@@ -190,6 +198,41 @@ router.post(
     }
   }
 );
+
+/**
+ * GET /api/booking/:id/qr-status
+ * Check payment status of Razorpay QR order for a settlement.
+ */
+router.get('/:id/qr-status', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const orderRes = await query(
+      `SELECT status, razorpay_order_id, razorpay_payment_id FROM payment_orders WHERE booking_id = $1 AND purpose = 'settlement' ORDER BY created_at DESC LIMIT 1`,
+      [id]
+    );
+    if (orderRes.rows.length === 0) {
+      return res.json({ success: true, isPaid: false, status: 'not_found' });
+    }
+    const order = orderRes.rows[0];
+    const isPaid = order.status === 'paid' || order.status === 'captured';
+
+    if (isPaid) {
+      // Ensure booking is marked settled if paid
+      await query(`UPDATE bookings SET is_settled = TRUE WHERE id = $1`, [id]);
+    }
+
+    return res.json({
+      success: true,
+      isPaid,
+      status: order.status,
+      orderId: order.razorpay_order_id,
+      paymentId: order.razorpay_payment_id,
+    });
+  } catch (err) {
+    console.error('GET /api/booking/:id/qr-status error:', err);
+    return res.status(500).json({ error: 'Failed to check QR payment status.' });
+  }
+});
 
 /**
  * POST /api/booking/:id/confirm-cash

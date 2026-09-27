@@ -1345,7 +1345,7 @@ router.post(
   verifyToken,
   [
     body('bookingId').isString(),
-    body('settlementId').isString(),
+    body('settlementId').optional().isString(),
     body('otp').isLength({ min: 6, max: 6 }).isNumeric(),
     body('cashCollectedConfirmed').optional().isBoolean(),
     body('idempotencyKey').optional().isString()

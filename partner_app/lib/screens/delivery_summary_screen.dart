@@ -315,89 +315,17 @@ class _DeliverySummaryScreenState extends State<DeliverySummaryScreen> {
           _isCompleting = false;
         });
         _showFareUpdatedDialog();
-      } else if (response.statusCode == 404) {
-        // Fallback to legacy completion route (/api/booking/status) if complete-delivery endpoint is not yet on server
-        final fallbackUrl = Uri.parse('${widget.apiBaseUrl}/api/booking/status');
-        final fallbackResponse = await http.post(
-          fallbackUrl,
-          headers: headers,
-          body: json.encode({
-            'bookingId': widget.bookingId,
-            'status': 'completed',
-            'otp': _enteredOtp,
-          }),
-        ).timeout(const Duration(seconds: 15));
-
-        final fallbackBody = json.decode(fallbackResponse.body) as Map<String, dynamic>;
-        if (fallbackResponse.statusCode == 200 && fallbackBody['success'] == true) {
-          setState(() {
-            _isCompleting = false;
-            _completionReceipt = {
-              'bookingId': widget.bookingId,
-              'vayaFareTotal': _settlement?['vayaFareTotal'] ?? 0,
-              'amountCollectedAtPickup': _settlement?['amountCollectedAtPickup'] ?? 0,
-              'amountPaidOnline': _settlement?['amountPaidOnline'] ?? 0,
-              'amountDueNow': _settlement?['amountDueNow'] ?? 0,
-              'paymentStatus': _settlement?['paymentStatus'] ?? 'paid',
-              'settlementId': _settlement?['settlementId'] ?? 'SETTLE-LOCAL',
-            };
-          });
-          _showCompletionReceiptModal();
-        } else {
-          final errText = fallbackBody['error']?.toString() ?? 'Completion failed. Invalid OTP or server error.';
-          setState(() {
-            _isCompleting = false;
-            _otpError = errText;
-          });
-        }
       } else {
-        final errText = body['error']?.toString() ?? 'Completion failed. Please verify details.';
+        final errText = body['message'] ?? body['error']?.toString() ?? 'Completion failed. Please verify details.';
         setState(() {
           _isCompleting = false;
           _otpError = errText;
         });
       }
     } catch (e) {
-      // Emergency catch fallback
-      try {
-        final token = widget.authToken ?? await DriverAuthHelper.getAuthToken();
-        final fallbackUrl = Uri.parse('${widget.apiBaseUrl}/api/booking/status');
-        final headers = <String, String>{
-          'Content-Type': 'application/json',
-          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-        };
-        final fallbackResponse = await http.post(
-          fallbackUrl,
-          headers: headers,
-          body: json.encode({
-            'bookingId': widget.bookingId,
-            'status': 'completed',
-            'otp': _enteredOtp,
-          }),
-        ).timeout(const Duration(seconds: 15));
-
-        final fallbackBody = json.decode(fallbackResponse.body) as Map<String, dynamic>;
-        if (fallbackResponse.statusCode == 200 && fallbackBody['success'] == true) {
-          setState(() {
-            _isCompleting = false;
-            _completionReceipt = {
-              'bookingId': widget.bookingId,
-              'vayaFareTotal': _settlement?['vayaFareTotal'] ?? 0,
-              'amountCollectedAtPickup': _settlement?['amountCollectedAtPickup'] ?? 0,
-              'amountPaidOnline': _settlement?['amountPaidOnline'] ?? 0,
-              'amountDueNow': _settlement?['amountDueNow'] ?? 0,
-              'paymentStatus': _settlement?['paymentStatus'] ?? 'paid',
-              'settlementId': _settlement?['settlementId'] ?? 'SETTLE-LOCAL',
-            };
-          });
-          _showCompletionReceiptModal();
-          return;
-        }
-      } catch (_) {}
-
       setState(() {
         _isCompleting = false;
-        _otpError = 'Network error during completion. Please check your connection and retry.';
+        _otpError = 'Network error during completion: $e';
       });
     }
   }

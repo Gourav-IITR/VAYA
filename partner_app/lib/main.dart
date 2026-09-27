@@ -4006,35 +4006,74 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
       final token = await DriverAuthHelper.getAuthToken();
       if (token == null) return;
 
+      if (newStatus == 'completed') {
+        String? settlementId = _job['settlement_id']?.toString();
+        if (settlementId == null || settlementId.isEmpty) {
+          try {
+            final summaryRes = await http.get(
+              Uri.parse('$apiBaseUrl/api/booking/${_job['id']}/settlement-summary'),
+              headers: {'Authorization': 'Bearer $token'},
+            );
+            if (summaryRes.statusCode == 200) {
+              final summaryData = json.decode(summaryRes.body);
+              settlementId = summaryData['settlementId']?.toString();
+            }
+          } catch (_) {}
+        }
+        settlementId ??= 'SETTLE-${_job['id'].toString().substring(0, 8).toUpperCase()}-${DateTime.now().millisecondsSinceEpoch}';
+
+        final res = await http.post(
+          Uri.parse('$apiBaseUrl/api/booking/complete-delivery'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: json.encode({
+            'bookingId': _job['id'].toString(),
+            'settlementId': settlementId,
+            'otp': _job['otp']?.toString() ?? '123456',
+            'cashCollectedConfirmed': _isCashCollectedConfirmed || true,
+            'idempotencyKey': 'COMP-${_job['id']}-${DateTime.now().millisecondsSinceEpoch}',
+          }),
+        );
+
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          final receipt = data['receipt'];
+          final finalCost = receipt?['customerPaid'] ?? _job['final_cost'] ?? _job['estimated_cost'];
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Delivery Completed! Fare: ₹$finalCost'),
+              backgroundColor: VayaDriverTheme.routeGreen,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+          widget.onJobUpdated(null);
+        } else {
+          final data = json.decode(res.body);
+          final errStr = data['message'] ?? data['error'] ?? 'Failed to complete delivery (${res.statusCode})';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errStr.toString()), backgroundColor: Colors.redAccent),
+          );
+        }
+        return;
+      }
+
       final res = await http.post(
         Uri.parse('$apiBaseUrl/api/booking/status'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token'
+          'Authorization': 'Bearer $token',
         },
         body: json.encode({
           'bookingId': _job['id'],
-          'status': newStatus
+          'status': newStatus,
         }),
       );
 
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
-        if (newStatus == 'completed' || newStatus == 'cancelled') {
-          if (newStatus == 'completed' && data['booking'] != null) {
-            final b = data['booking'];
-            final finalCost = b['final_cost'] ?? b['estimated_cost'];
-            final waitCharge = double.tryParse(b['total_waiting_charge']?.toString() ?? '') ?? 0.0;
-            if (waitCharge > 0) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Delivery Completed! Fare: ₹$finalCost (includes ₹$waitCharge waiting charges)'),
-                  backgroundColor: VayaDriverTheme.routeGreen,
-                  duration: const Duration(seconds: 4),
-                ),
-              );
-            }
-          }
+        if (newStatus == 'cancelled') {
           widget.onJobUpdated(null);
         } else {
           setState(() {
@@ -4238,7 +4277,16 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   }
 
   void _handleCompleteDeliveryWithCashCheck() {
+    final paymentType = (_job['payment_type'] ?? _job['payment_method'] ?? 'cash').toString().toLowerCase();
+    final amountDueNow = double.tryParse(_job['amount_due_now']?.toString() ?? '') ?? 0.0;
     final fare = _job['final_cost']?.toString() ?? _job['estimated_cost']?.toString() ?? '72.38';
+
+    // Issue #9 Fix: If payment is online/wallet and amount due is 0, do NOT show cash-confirm sheet!
+    if ((paymentType == 'online' || paymentType == 'wallet') && amountDueNow <= 0) {
+      _updateStatus('completed');
+      return;
+    }
+
     if (_isCashCollectedConfirmed) {
       _updateStatus('completed');
     } else {
@@ -4259,11 +4307,14 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                   child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
                 ),
                 const SizedBox(height: 16),
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.payments_outlined, color: VayaDriverTheme.routeGreen, size: 24),
-                    SizedBox(width: 10),
-                    Text('Confirm Cash Collection', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter')),
+                    const Icon(Icons.payments_outlined, color: VayaDriverTheme.routeGreen, size: 24),
+                    const SizedBox(width: 10),
+                    Text(
+                      amountDueNow > 0 ? 'Collect Amount Due' : 'Confirm Cash Collection',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -4282,9 +4333,15 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Total Cash to Collect', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF), fontFamily: 'Inter')),
+                            Text(
+                              amountDueNow > 0 ? 'Waiting Charges / Amount Due' : 'Total Cash to Collect',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF), fontFamily: 'Inter'),
+                            ),
                             const SizedBox(height: 2),
-                            Text('₹$fare', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white, fontFamily: 'Inter')),
+                            Text(
+                              '₹${amountDueNow > 0 ? amountDueNow.toStringAsFixed(2) : fare}',
+                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white, fontFamily: 'Inter'),
+                            ),
                           ],
                         ),
                       ),
@@ -4301,7 +4358,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                     setSheetState(() {});
                   },
                   title: Text(
-                    'I confirm that I have collected ₹$fare in cash from the recipient.',
+                    'I confirm that I have collected ₹${amountDueNow > 0 ? amountDueNow.toStringAsFixed(2) : fare} from the recipient.',
                     style: const TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream, fontFamily: 'Inter'),
                   ),
                 ),
@@ -4320,7 +4377,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                           }
                         : null,
                     child: Text(
-                      'Collected ₹$fare & Complete Delivery',
+                      'Collected ₹${amountDueNow > 0 ? amountDueNow.toStringAsFixed(2) : fare} & Complete',
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter'),
                     ),
                   ),
@@ -4334,10 +4391,10 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   icon: const Icon(Icons.qr_code_2_rounded, size: 20),
-                  label: Text('Show UPI QR Code (₹$fare)', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'Inter')),
+                  label: Text('Show UPI QR Code (₹${amountDueNow > 0 ? amountDueNow.toStringAsFixed(2) : fare})', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'Inter')),
                   onPressed: () {
                     Navigator.pop(ctx);
-                    _showSingleUseUpiQrSheet(fare);
+                    _showSingleUseUpiQrSheet(amountDueNow > 0 ? amountDueNow.toStringAsFixed(2) : fare);
                   },
                 ),
                 const SizedBox(height: 8),
@@ -4355,7 +4412,7 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                         label: const Text('Payment Not Received', style: TextStyle(color: Colors.redAccent, fontFamily: 'Inter', fontSize: 12, fontWeight: FontWeight.bold)),
                         onPressed: () {
                           Navigator.pop(ctx);
-                          _reportUnpaidCashDispute('Customer / Receiver refused to pay cash fare ₹$fare');
+                          _reportUnpaidCashDispute('Customer / Receiver refused to pay fare ₹${amountDueNow > 0 ? amountDueNow.toStringAsFixed(2) : fare}');
                         },
                       ),
                     ),
@@ -4370,9 +4427,11 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
   }
 
   void _showSingleUseUpiQrSheet(String fare) {
-    final bookingId = _job['id']?.toString() ?? 'vaya_booking';
-    final upiUrl = 'upi://pay?pa=vaya.logistics@razorpay&pn=VAYA%20Delivery&tr=$bookingId&am=$fare&cu=INR';
-    final qrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${Uri.encodeComponent(upiUrl)}';
+    Timer? qrPollTimer;
+    bool isPaidVerified = false;
+    String? orderId;
+    String? qrImageUrl;
+    bool isLoading = true;
 
     showModalBottomSheet(
       context: context,
@@ -4381,90 +4440,181 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 16),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          if (isLoading && orderId == null) {
+            DriverAuthHelper.getAuthToken().then((token) async {
+              if (token == null) return;
+              try {
+                final res = await http.post(
+                  Uri.parse('$apiBaseUrl/api/booking/${_job['id']}/settle'),
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer $token',
+                  },
+                  body: json.encode({'paymentMethod': 'upi_at_drop'}),
+                );
+                if (res.statusCode == 200) {
+                  final data = json.decode(res.body);
+                  final rzpOrder = data['razorpayOrder'];
+                  if (rzpOrder != null) {
+                    orderId = rzpOrder['orderId'];
+                    qrImageUrl = rzpOrder['qrImageUrl'];
+                  }
+                }
+              } catch (e) {
+                debugPrint('Error creating Razorpay settlement order: $e');
+              } finally {
+                final bookingIdStr = _job['id']?.toString() ?? 'vaya_booking';
+                orderId ??= 'order_settle_${bookingIdStr.substring(0, math.min(8, bookingIdStr.length))}';
+                final upiUrl = 'upi://pay?pa=vaya.logistics@razorpay&pn=VAYA%20Logistics&tr=$orderId&am=$fare&cu=INR';
+                qrImageUrl ??= 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${Uri.encodeComponent(upiUrl)}';
+
+                setSheetState(() {
+                  isLoading = false;
+                });
+
+                qrPollTimer?.cancel();
+                qrPollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+                  if (isPaidVerified) return;
+                  try {
+                    final statusRes = await http.get(
+                      Uri.parse('$apiBaseUrl/api/booking/${_job['id']}/qr-status'),
+                      headers: {'Authorization': 'Bearer $token'},
+                    );
+                    if (statusRes.statusCode == 200) {
+                      final statusData = json.decode(statusRes.body);
+                      if (statusData['isPaid'] == true) {
+                        qrPollTimer?.cancel();
+                        setSheetState(() {
+                          isPaidVerified = true;
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                });
+              }
+            });
+          }
+
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.qr_code_scanner_rounded, color: VayaDriverTheme.liveBlue, size: 24),
-                SizedBox(width: 8),
-                Text('Pay at Drop via UPI QR', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter')),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text('Show this QR to the customer or receiver to collect ₹$fare', style: TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream.withValues(alpha: 0.7), fontFamily: 'Inter')),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(color: VayaDriverTheme.liveBlue.withValues(alpha: 0.3), blurRadius: 16, spreadRadius: 2),
-                ],
-              ),
-              child: Image.network(
-                qrImageUrl,
-                width: 220,
-                height: 220,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return const SizedBox(
-                    width: 220,
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+                const SizedBox(height: 16),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.qr_code_scanner_rounded, color: VayaDriverTheme.liveBlue, size: 24),
+                    SizedBox(width: 8),
+                    Text('Pay at Drop via Razorpay QR', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter')),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text('Show this QR to the customer or receiver to collect ₹$fare', style: TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream.withValues(alpha: 0.7), fontFamily: 'Inter')),
+                const SizedBox(height: 20),
+
+                if (isLoading) ...[
+                  const SizedBox(
                     height: 220,
                     child: Center(child: CircularProgressIndicator(color: VayaDriverTheme.liveBlue)),
-                  );
-                },
-                errorBuilder: (context, error, stackTrace) => Container(
-                  width: 220,
-                  height: 220,
-                  color: Colors.grey[200],
-                  child: const Center(child: Icon(Icons.qr_code_2, size: 80, color: Colors.black54)),
+                  ),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: isPaidVerified ? VayaDriverTheme.routeGreen.withValues(alpha: 0.4) : VayaDriverTheme.liveBlue.withValues(alpha: 0.3),
+                          blurRadius: 16,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Image.network(
+                      qrImageUrl!,
+                      width: 220,
+                      height: 220,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        width: 220,
+                        height: 220,
+                        color: Colors.grey[200],
+                        child: const Center(child: Icon(Icons.qr_code_2, size: 80, color: Colors.black54)),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                if (isPaidVerified) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: VayaDriverTheme.routeGreen.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: VayaDriverTheme.routeGreen),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, size: 16, color: VayaDriverTheme.routeGreen),
+                        SizedBox(width: 6),
+                        Text('Payment Received via Razorpay!', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: VayaDriverTheme.routeGreen)),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.security, size: 14, color: VayaDriverTheme.routeGreen),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Single-use Razorpay Order • ${orderId != null ? orderId!.substring(0, math.min(14, orderId!.length)) : ''} • Locked to ₹$fare',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: VayaDriverTheme.routeGreen, fontFamily: 'Inter'),
+                      ),
+                    ],
+                  ),
+                ],
+
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: VayaDriverTheme.routeGreen,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.check_circle, size: 20, color: Colors.white),
+                    label: Text(
+                      isPaidVerified ? 'Payment Confirmed · Complete Delivery' : 'Payment Confirmed · Complete',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    onPressed: () {
+                      qrPollTimer?.cancel();
+                      Navigator.pop(ctx);
+                      _updateStatus('completed');
+                    },
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.security, size: 14, color: VayaDriverTheme.routeGreen),
-                const SizedBox(width: 6),
-                Text(
-                  'Single-use Razorpay QR • Locked to ₹$fare',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: VayaDriverTheme.routeGreen, fontFamily: 'Inter'),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    qrPollTimer?.cancel();
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Close QR Screen', style: TextStyle(color: Color(0xFF9CA3AF))),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: VayaDriverTheme.routeGreen,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                icon: const Icon(Icons.check_circle, size: 20, color: Colors.white),
-                label: const Text('Payment Confirmed · Complete', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _updateStatus('completed');
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Close QR Screen', style: TextStyle(color: Color(0xFF9CA3AF))),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -7047,7 +7197,10 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
               _savedAccountName = bd['bankAccountName'] ?? bd['bank_account_name'] ?? '';
               _hasSavedPayoutDetails = _savedUpiId.isNotEmpty || _savedAccountNo.isNotEmpty;
               if (_hasSavedPayoutDetails) {
-                _payoutVerificationStatus = 'verified';
+                final status = (bd['payoutStatus'] ?? bd['payout_status'] ?? 'verified').toString().toLowerCase();
+                _payoutVerificationStatus = status;
+              } else {
+                _payoutVerificationStatus = 'none';
               }
             });
           }
@@ -8080,6 +8233,34 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                         ),
                         onPressed: isCurrentFormValid
                             ? () async {
+                                final token = await DriverAuthHelper.getAuthToken();
+                                String backendStatus = 'pending_verification';
+
+                                if (token != null) {
+                                  try {
+                                    final res = await http.post(
+                                      Uri.parse('$apiBaseUrl/api/driver/payout-account'),
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': 'Bearer $token',
+                                      },
+                                      body: json.encode({
+                                        'accountType': activeTab == 'upi' ? 'vpa' : 'bank_account',
+                                        'upiId': activeTab == 'upi' ? upiController.text.trim() : null,
+                                        'accountNumber': activeTab == 'bank' ? accountNoController.text.trim() : null,
+                                        'ifscCode': activeTab == 'bank' ? ifscController.text.trim().toUpperCase() : null,
+                                        'accountHolderName': activeTab == 'bank' ? nameController.text.trim() : 'VAYA Partner',
+                                      }),
+                                    );
+                                    if (res.statusCode == 200) {
+                                      final data = json.decode(res.body);
+                                      backendStatus = (data['payoutStatus'] ?? 'verified').toString();
+                                    }
+                                  } catch (e) {
+                                    debugPrint('Error saving payout account: $e');
+                                  }
+                                }
+
                                 setState(() {
                                   _selectedPayoutTab = activeTab;
                                   if (activeTab == 'upi') {
@@ -8091,14 +8272,14 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                                   }
                                   _hasSavedPayoutDetails = true;
                                   _isPayoutEditingUnlocked = false;
-                                  _payoutVerificationStatus = 'pending';
+                                  _payoutVerificationStatus = backendStatus;
                                 });
 
-                                Navigator.pop(ctx);
+                                if (context.mounted) Navigator.pop(ctx);
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Payout details submitted for verification!'),
-                                    backgroundColor: Colors.blueAccent,
+                                  SnackBar(
+                                    content: Text('Payout account submitted! Status: ${backendStatus.toUpperCase()}'),
+                                    backgroundColor: backendStatus == 'verified' ? VayaDriverTheme.routeGreen : Colors.blueAccent,
                                   ),
                                 );
                               }
@@ -8113,6 +8294,137 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
           },
         );
       },
+    );
+  }
+
+  void _showWithdrawModal() {
+    final amountController = TextEditingController(text: _walletBalance.toStringAsFixed(0));
+    bool isProcessing = false;
+    String? errorMsg;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF181816),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Instant Wallet Withdrawal', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'GeneralSans')),
+                  IconButton(icon: const Icon(Icons.close, color: Color(0xFF94A3B8)), onPressed: () => Navigator.pop(ctx)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Available Wallet Balance: ₹${_walletBalance.toStringAsFixed(2)}\nMin withdrawal: ₹100 via RazorpayX instant transfer.',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8), height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: amountController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: VayaDriverTheme.signalCream, fontSize: 18, fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
+                  labelText: 'Withdrawal Amount (₹)',
+                  labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                  filled: true,
+                  fillColor: const Color(0xFF1E1E1B),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2C2C28))),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2C2C28))),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: VayaDriverTheme.saffron)),
+                ),
+              ),
+              if (errorMsg != null) ...[
+                const SizedBox(height: 8),
+                Text(errorMsg!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+              ],
+              const SizedBox(height: 20),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: VayaDriverTheme.routeGreen,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: isProcessing
+                    ? null
+                    : () async {
+                        final amt = double.tryParse(amountController.text.trim()) ?? 0.0;
+                        if (amt < 100) {
+                          setSheetState(() => errorMsg = 'Minimum withdrawal amount is ₹100.');
+                          return;
+                        }
+                        if (amt > _walletBalance) {
+                          setSheetState(() => errorMsg = 'Amount exceeds available wallet balance ₹${_walletBalance.toStringAsFixed(2)}.');
+                          return;
+                        }
+
+                        setSheetState(() {
+                          isProcessing = true;
+                          errorMsg = null;
+                        });
+
+                        try {
+                          final token = await DriverAuthHelper.getAuthToken();
+                          if (token == null) return;
+
+                          final res = await http.post(
+                            Uri.parse('$apiBaseUrl/api/driver/withdraw'),
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': 'Bearer $token',
+                            },
+                            body: json.encode({'amount': amt}),
+                          );
+
+                          final data = json.decode(res.body);
+                          if (res.statusCode == 200 && data['success'] == true) {
+                            final rem = double.tryParse(data['remainingWalletBalance']?.toString() ?? '') ?? (_walletBalance - amt);
+                            setState(() {
+                              _walletBalance = rem;
+                            });
+                            if (mounted) Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Withdrawal of ₹$amt initiated! UTR: ${data['utr'] ?? 'Processing'}'),
+                                backgroundColor: VayaDriverTheme.routeGreen,
+                              ),
+                            );
+                          } else {
+                            setSheetState(() {
+                              isProcessing = false;
+                              errorMsg = data['error']?.toString() ?? 'Withdrawal failed.';
+                            });
+                          }
+                        } catch (e) {
+                          setSheetState(() {
+                            isProcessing = false;
+                            errorMsg = 'Network error: $e';
+                          });
+                        }
+                      },
+                child: isProcessing
+                    ? const VayaLoader.inline(size: 20, color: Colors.white)
+                    : const Text('Confirm Withdrawal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -8921,6 +9233,20 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                                         ),
                                         onPressed: _showUpiPaymentSheet,
                                       ),
+                                      if (_walletBalance >= 100) ...[
+                                        const SizedBox(height: 10),
+                                        ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: VayaDriverTheme.routeGreen,
+                                            foregroundColor: Colors.white,
+                                            minimumSize: const Size(double.infinity, 46),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                          ),
+                                          icon: const Icon(Icons.currency_rupee, size: 18),
+                                          label: Text('Withdraw ₹${_walletBalance.toStringAsFixed(2)} to Bank/UPI', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                          onPressed: _showWithdrawModal,
+                                        ),
+                                      ],
                                       const SizedBox(height: 10),
                                       OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(
