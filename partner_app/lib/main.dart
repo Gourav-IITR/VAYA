@@ -4325,6 +4325,21 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: VayaDriverTheme.liveBlue, width: 1.5),
+                    foregroundColor: VayaDriverTheme.liveBlue,
+                    minimumSize: const Size(double.infinity, 44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.qr_code_2_rounded, size: 20),
+                  label: Text('Show UPI QR Code (₹$fare)', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'Inter')),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _showSingleUseUpiQrSheet(fare);
+                  },
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -4352,6 +4367,106 @@ class _ActiveTripWorkflowScreenState extends State<ActiveTripWorkflowScreen> {
         ),
       );
     }
+  }
+
+  void _showSingleUseUpiQrSheet(String fare) {
+    final bookingId = _job['id']?.toString() ?? 'vaya_booking';
+    final upiUrl = 'upi://pay?pa=vaya.logistics@razorpay&pn=VAYA%20Delivery&tr=$bookingId&am=$fare&cu=INR';
+    final qrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${Uri.encodeComponent(upiUrl)}';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF18181B),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.qr_code_scanner_rounded, color: VayaDriverTheme.liveBlue, size: 24),
+                SizedBox(width: 8),
+                Text('Pay at Drop via UPI QR', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: 'Inter')),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text('Show this QR to the customer or receiver to collect ₹$fare', style: TextStyle(fontSize: 13, color: VayaDriverTheme.signalCream.withValues(alpha: 0.7), fontFamily: 'Inter')),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(color: VayaDriverTheme.liveBlue.withValues(alpha: 0.3), blurRadius: 16, spreadRadius: 2),
+                ],
+              ),
+              child: Image.network(
+                qrImageUrl,
+                width: 220,
+                height: 220,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return const SizedBox(
+                    width: 220,
+                    height: 220,
+                    child: Center(child: CircularProgressIndicator(color: VayaDriverTheme.liveBlue)),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) => Container(
+                  width: 220,
+                  height: 220,
+                  color: Colors.grey[200],
+                  child: const Center(child: Icon(Icons.qr_code_2, size: 80, color: Colors.black54)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.security, size: 14, color: VayaDriverTheme.routeGreen),
+                const SizedBox(width: 6),
+                Text(
+                  'Single-use Razorpay QR • Locked to ₹$fare',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: VayaDriverTheme.routeGreen, fontFamily: 'Inter'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: VayaDriverTheme.routeGreen,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.check_circle, size: 20, color: Colors.white),
+                label: const Text('Payment Confirmed · Complete', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _updateStatus('completed');
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close QR Screen', style: TextStyle(color: Color(0xFF9CA3AF))),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _openGoogleMapsNavigation(double lat, double lng) async {
