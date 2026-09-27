@@ -95,13 +95,13 @@ cd ..
 echo ""
 echo ">>> Building VAYA Customer Flutter Web App..."
 cd customer_app
-flutter build web --release
+flutter build web --release --no-tree-shake-icons
 cd ..
 
 echo ""
 echo ">>> Building VAYA Partner Flutter Web App..."
 cd partner_app
-flutter build web --release
+flutter build web --release --no-tree-shake-icons
 cd ..
 
 # 5. Build & Deploy Backend on Google Cloud Run
