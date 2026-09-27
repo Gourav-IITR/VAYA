@@ -31,8 +31,17 @@ try {
   messaging = getMessaging(adminApp);
   console.log('✅ Firebase Admin SDK initialized successfully.');
 } catch (err) {
-  console.error('❌ Failed to initialize Firebase Admin SDK:', err.message);
-  process.exit(1);
+  console.warn('⚠️ Primary Firebase Admin initialization failed, attempting project-only fallback:', err.message);
+  try {
+    adminApp = initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID || 'goods-delivery-platform'
+    });
+    auth = getAuth(adminApp);
+    messaging = getMessaging(adminApp);
+    console.log('✅ Firebase Admin SDK initialized via fallback.');
+  } catch (fallbackErr) {
+    console.error('⚠️ Firebase Admin SDK fallback also failed:', fallbackErr.message);
+  }
 }
 
 export { auth, messaging };
